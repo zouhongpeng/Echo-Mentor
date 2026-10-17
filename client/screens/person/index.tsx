@@ -50,6 +50,26 @@ export default function PersonDetailScreen() {
   const [noteInput, setNoteInput] = useState('');
   const [portrait, setPortrait] = useState<any>(null);
   const [loadingPortrait, setLoadingPortrait] = useState(false);
+  const [outcomeFor, setOutcomeFor] = useState<any>(null);
+  const [outcomeInput, setOutcomeInput] = useState('');
+  const [savingOutcome, setSavingOutcome] = useState(false);
+
+  const saveOutcome = async () => {
+    const t = outcomeInput.trim();
+    if (!t || !outcomeFor) return;
+    setSavingOutcome(true);
+    try {
+      await api.analysisOutcome(outcomeFor.id, t);
+      setOutcomeFor(null);
+      setOutcomeInput('');
+      load();
+      Alert.alert('已记录', 'AI 评估完成，可在时间线里查看效果与改进建议');
+    } catch (e: any) {
+      Alert.alert('评估失败', e?.message);
+    } finally {
+      setSavingOutcome(false);
+    }
+  };
 
   const notesKey = `echo_notes_${id}`;
   const loadNotes = async () => {
@@ -134,6 +154,28 @@ export default function PersonDetailScreen() {
   const latestTemp = temps.length ? temps[temps.length - 1].label : '';
   const latestTempColor = TEMP_COLOR[latestTemp] || '#C9A227';
 
+  // 关系体检统计（纯前端计算）
+  const stats = React.useMemo(() => {
+    let total = 0, mine = 0;
+    for (const a of analyses) {
+      const lines = (a.chat_input || '').split('\n').filter((l: string) => l.trim());
+      total += lines.length;
+      mine += lines.filter((l: string) => /^\s*我[:：]/.test(l)).length;
+    }
+    const weekCount = analyses.filter((a) => dayjs(a.created_at).isAfter(dayjs().subtract(7, 'day'))).length;
+    const tempChange = temps.length >= 2 ? `${temps[0].label}→${temps[temps.length - 1].label}` : temps.length ? temps[0].label : '–';
+    return { myRatio: total ? Math.round((mine / total) * 100) : null, total: analyses.length, weekCount, tempChange };
+  }, [analyses, temps]);
+
+  // 时机提醒：取最近一条带 timing 的分析
+  const timing = React.useMemo(() => {
+    for (let i = analyses.length - 1; i >= 0; i--) {
+      const t = analyses[i]?.result?.timing;
+      if (t?.opportunities?.length) return { ...t, from: analyses[i] };
+    }
+    return null;
+  }, [analyses]);
+
   return (
     <Screen safeAreaEdges={['top', 'left', 'right', 'bottom']}>
       <View className="px-4 pt-2 pb-1">
@@ -217,13 +259,13 @@ export default function PersonDetailScreen() {
           <View className="mt-3 flex-row gap-3">
             <TouchableOpacity
               onPress={() => router.push('/rehearse', { person_id: id, person_name: person.name })}
-              className="flex-1 bg-white border border-[#E5E5EA] rounded-2xl px-4 py-3.5 flex-row items-center justify-center"
+              className="flex-1 bg-surface border border-border rounded-2xl px-4 py-3.5 flex-row items-center justify-center"
             >
               <Text className="text-[14px] font-medium text-foreground">🎭 模拟演练</Text>
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => setNoteModal(true)}
-              className="flex-1 bg-white border border-[#E5E5EA] rounded-2xl px-4 py-3.5 flex-row items-center justify-center"
+              className="flex-1 bg-surface border border-border rounded-2xl px-4 py-3.5 flex-row items-center justify-center"
             >
               <Text className="text-[14px] font-medium text-foreground">⚡ 快记一句</Text>
             </TouchableOpacity>
@@ -247,7 +289,7 @@ export default function PersonDetailScreen() {
               </View>
             )}
             {portrait && (
-              <View className="rounded-2xl bg-white border border-[#E5E5EA] p-4">
+              <View className="rounded-2xl bg-surface border border-border p-4">
                 {!!portrait.style && (
                   <View className="mb-3">
                     <Text className="text-[11px] font-semibold text-accent mb-0.5">TA 的沟通风格</Text>
@@ -285,20 +327,55 @@ export default function PersonDetailScreen() {
           {/* 快记列表 */}
           {notes.length > 0 && (
             <View className="mt-5">
-              <Text className="text-[15px] font-semibold text-foreground mb-2">⚡ 快记</Text>
+              <View className="flex-row items-center justify-between mb-2">
+                <Text className="text-[15px] font-semibold text-foreground">⚡ 快记</Text>
+                <TouchableOpacity
+                  onPress={() => router.push('/analyze', { person_id: id, person_name: person.name, prefill_note: notes.map((n) => n.text).join('\n') })}
+                >
+                  <Text className="text-[12px] text-accent font-medium">全部送入分析</Text>
+                </TouchableOpacity>
+              </View>
               {notes.slice(0, 5).map((n) => (
-                <View key={n.at} className="bg-white rounded-xl border border-[#E5E5EA] px-3.5 py-2.5 mb-2 flex-row items-center justify-between">
+                <View key={n.at} className="bg-surface rounded-xl border border-border px-3.5 py-2.5 mb-2 flex-row items-center justify-between">
                   <View className="flex-1 mr-2">
                     <Text className="text-[13px] text-foreground leading-5">{n.text}</Text>
                     <Text className="text-[10px] text-muted mt-0.5">{dayjs(n.at).format('M月D日 HH:mm')}</Text>
                   </View>
-                  <TouchableOpacity onPress={() => deleteNote(n.at)} hitSlop={8}>
-                    <Text className="text-[12px] text-muted">✕</Text>
-                  </TouchableOpacity>
+                  <View className="flex-row items-center">
+                    <TouchableOpacity
+                      onPress={() => router.push('/analyze', { person_id: id, person_name: person.name, prefill_note: n.text })}
+                      hitSlop={6}
+                      className="mr-2"
+                    >
+                      <Text className="text-[12px] text-accent font-medium">送入分析</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => deleteNote(n.at)} hitSlop={8}>
+                      <Text className="text-[12px] text-muted">✕</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               ))}
             </View>
           )}
+
+          {/* 关系体检 */}
+          <View className="mt-7">
+            <Text className="text-[15px] font-semibold text-foreground mb-3">关系体检</Text>
+            <View className="flex-row flex-wrap gap-2.5">
+              {[
+                { label: '你主动', value: stats.myRatio != null ? `${stats.myRatio}%` : '–', sub: '聊天占比' },
+                { label: '分析次数', value: String(stats.total), sub: '累计记录' },
+                { label: '本周', value: `${stats.weekCount} 次`, sub: '最近 7 天' },
+                { label: '温度变化', value: stats.tempChange, sub: '首末对比' },
+              ].map((c, i) => (
+                <View key={i} className="bg-surface rounded-2xl border border-border px-4 py-3" style={{ width: '48%' }}>
+                  <Text className="text-[11px] text-muted">{c.label}</Text>
+                  <Text className="text-[17px] font-bold text-foreground mt-0.5" numberOfLines={1}>{c.value}</Text>
+                  <Text className="text-[10px] text-muted/70">{c.sub}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
 
           {/* 温度趋势 */}
           <View className="mt-7">
@@ -318,13 +395,29 @@ export default function PersonDetailScreen() {
               <Text className="text-[13px] text-muted">还没有记录重要日期</Text>
             ) : (
               (person.dates || []).map((d: any, i: number) => (
-                <View key={i} className="flex-row items-center justify-between py-2 border-b border-[#F0F0F0]">
+                <View key={i} className="flex-row items-center justify-between py-2 border-b border-border">
                   <Text className="text-[15px] text-foreground">{d.name}</Text>
                   <Text className="text-[15px] text-muted">{fmtDate(d.month_day)}</Text>
                 </View>
               ))
             )}
           </View>
+
+          {/* 时机提醒 */}
+          {timing && (
+            <View className="mt-7">
+              <Text className="text-[15px] font-semibold text-foreground mb-3">⏰ 时机提醒</Text>
+              <View className="rounded-2xl bg-white border border-border p-4">
+                <Text className="text-[11px] text-muted mb-2">AI 从你们的对话中发现了这些可以跟进的时机</Text>
+                {timing.opportunities.map((o: any, i: number) => (
+                  <View key={i} className="mb-2 last:mb-0">
+                    <Text className="text-[13px] font-semibold text-foreground">{o.when} · {o.what}</Text>
+                    {!!o.suggestion && <Text className="text-[12px] text-muted leading-4 mt-0.5">💡 {o.suggestion}</Text>}
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
 
           {/* 时间线 */}
           <View className="mt-7">
@@ -347,6 +440,7 @@ export default function PersonDetailScreen() {
                   onMove={async (direction: 'up' | 'down') => {
                     try { await api.moveAnalysis(a.id, direction); load(); } catch (e: any) { Alert.alert('调整失败', e?.message); }
                   }}
+                  onOutcome={() => setOutcomeFor(a)}
                 />
               ))
             )}
@@ -363,10 +457,34 @@ export default function PersonDetailScreen() {
         />
       ) : null}
 
+      {/* 效果复盘 Modal */}
+      <Modal visible={!!outcomeFor} transparent animationType="slide" onRequestClose={() => setOutcomeFor(null)}>
+        <View className="flex-1 bg-black/30 justify-end">
+          <View className="bg-white rounded-t-3xl p-6 pb-8">
+            <View className="flex-row items-center justify-between mb-4">
+              <Text className="text-xl font-bold text-foreground">回复效果复盘</Text>
+              <TouchableOpacity onPress={() => setOutcomeFor(null)} hitSlop={10}><Text className="text-2xl text-muted">✕</Text></TouchableOpacity>
+            </View>
+            <Text className="text-[12px] text-muted mb-3">把对方收到你回复后的实际回应粘贴进来，AI 会评估这条回复的效果，并给你下次的微调建议。</Text>
+            <TextInput
+              value={outcomeInput}
+              onChangeText={setOutcomeInput}
+              placeholder={`例：${person?.name || 'TA'}回了一句「好吧」，感觉还是有点勉强…`}
+              placeholderTextColor="#9C9CA3"
+              multiline
+              className="bg-on-surface rounded-xl px-4 py-3 text-[15px] text-foreground min-h-[90px]"
+            />
+            <TouchableOpacity onPress={saveOutcome} disabled={savingOutcome || !outcomeInput.trim()} className="mt-4 h-12 rounded-xl bg-accent items-center justify-center">
+              {savingOutcome ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-semibold">让 AI 评估</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* 快记 Modal */}
       <Modal visible={noteModal} transparent animationType="slide" onRequestClose={() => setNoteModal(false)}>
         <View className="flex-1 bg-black/30 justify-end">
-          <View className="bg-white rounded-t-3xl p-6 pb-8">
+          <View className="bg-surface rounded-t-3xl p-6 pb-8">
             <View className="flex-row items-center justify-between mb-4">
               <Text className="text-xl font-bold text-foreground">⚡ 快记一句</Text>
               <TouchableOpacity onPress={() => setNoteModal(false)} hitSlop={10}><Text className="text-2xl text-muted">✕</Text></TouchableOpacity>
@@ -378,7 +496,7 @@ export default function PersonDetailScreen() {
               placeholder="例：今天 TA 主动帮我带了饭"
               placeholderTextColor="#9C9CA3"
               multiline
-              className="bg-[#F6F6F6] rounded-xl px-4 py-3 text-[15px] text-foreground min-h-[90px]"
+              className="bg-on-surface rounded-xl px-4 py-3 text-[15px] text-foreground min-h-[90px]"
             />
             <TouchableOpacity onPress={saveNote} disabled={!noteInput.trim()} className="mt-4 h-12 rounded-xl bg-accent items-center justify-center">
               <Text className="text-white font-semibold">保存</Text>
@@ -558,12 +676,12 @@ function ChatBubbles({ text }: { text: string }) {
   );
 }
 
-function TimelineCard({ record, personaName, first, last, expanded, onToggle, onDelete, onMove }: any) {
+function TimelineCard({ record, personaName, first, last, expanded, onToggle, onDelete, onMove, onOutcome }: any) {
   const status = record.status;
   const res = record.result || {};
   const running = status === 'gen';
   return (
-    <View className="bg-white rounded-2xl border border-[#E5E5EA] mb-3 overflow-hidden">
+    <View className="bg-surface rounded-2xl border border-border mb-3 overflow-hidden">
       <TouchableOpacity onPress={onToggle} className="px-4 py-3 flex-row items-center justify-between">
         <View className="flex-row items-center">
           <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: TEMP_COLOR[record.temp_label] || '#CCC' }} />
@@ -632,6 +750,30 @@ function TimelineCard({ record, personaName, first, last, expanded, onToggle, on
                   ))}
                 </View>
               )}
+              {(() => {
+                const outcome = record.result?.outcome;
+                const usedAny = Object.values(record.result?.marks || {}).some(Boolean);
+                const color = outcome?.effect === '好' ? '#3E8E41' : outcome?.effect === '翻车' ? '#E4572E' : '#C9A227';
+                if (outcome) {
+                  return (
+                    <View className="mt-2 rounded-xl border border-border bg-on-surface px-3 py-2.5">
+                      <View className="flex-row items-center">
+                        <Text className="text-[12px] font-bold" style={{ color }}>效果：{outcome.effect}</Text>
+                        {!!outcome.reason && <Text className="ml-2 text-[11px] text-muted flex-1" numberOfLines={2}>{outcome.reason}</Text>}
+                      </View>
+                      {!!outcome.lesson && <Text className="mt-1 text-[11px] text-foreground/75 leading-4">💡 {outcome.lesson}</Text>}
+                    </View>
+                  );
+                }
+                if (usedAny) {
+                  return (
+                    <TouchableOpacity onPress={onOutcome} className="mt-2 rounded-xl border border-accent/30 bg-accent/10 px-3 py-2">
+                      <Text className="text-[12px] text-accent font-medium">📨 记录对方的回应，评估这条回复的效果</Text>
+                    </TouchableOpacity>
+                  );
+                }
+                return null;
+              })()}
               <View className="pt-2 border-t border-[#F4F4F4] flex-row items-center justify-between">
                 <Text className="text-[12px] text-muted flex-1" numberOfLines={1}>
                   温度：{record.temp_label}  {record.temp_reason}
@@ -691,14 +833,14 @@ function EditPersonModal({ person, onClose, onSaved, onDeleted }: any) {
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View className="flex-1 bg-black/30 justify-end">
-        <View className="bg-white rounded-t-3xl p-6 pb-8 max-h-[88%]">
+        <View className="bg-surface rounded-t-3xl p-6 pb-8 max-h-[88%]">
           <View className="flex-row items-center justify-between mb-5">
             <Text className="text-xl font-bold text-foreground">编辑档案</Text>
             <TouchableOpacity onPress={onClose} hitSlop={10}><Text className="text-2xl text-muted">✕</Text></TouchableOpacity>
           </View>
           <ScrollView keyboardShouldPersistTaps="handled">
-            <Field label="称呼"><TextInput value={form.name} onChangeText={(t) => setForm({ ...form, name: t })} placeholder="称呼" placeholderTextColor="#C9C9C9" className="bg-[#F6F6F6] rounded-xl px-4 h-12 text-base text-foreground" /></Field>
-            <Field label="关系"><TextInput value={form.relationship} onChangeText={(t) => setForm({ ...form, relationship: t })} placeholder="关系" placeholderTextColor="#C9C9C9" className="bg-[#F6F6F6] rounded-xl px-4 h-12 text-base text-foreground" /></Field>
+            <Field label="称呼"><TextInput value={form.name} onChangeText={(t) => setForm({ ...form, name: t })} placeholder="称呼" placeholderTextColor="#C9C9C9" className="bg-on-surface rounded-xl px-4 h-12 text-base text-foreground" /></Field>
+            <Field label="关系"><TextInput value={form.relationship} onChangeText={(t) => setForm({ ...form, relationship: t })} placeholder="关系" placeholderTextColor="#C9C9C9" className="bg-on-surface rounded-xl px-4 h-12 text-base text-foreground" /></Field>
             <Field label="头像颜色圆点">
               <View className="flex-row flex-wrap gap-3">
                 {AVATAR_COLORS.map((c) => (
@@ -708,12 +850,12 @@ function EditPersonModal({ person, onClose, onSaved, onDeleted }: any) {
                 ))}
               </View>
             </Field>
-            <Field label="背景备注"><TextInput value={form.background} onChangeText={(t) => setForm({ ...form, background: t })} placeholder="性格/聊天风格/当前阶段" placeholderTextColor="#C9C9C9" multiline className="bg-[#F6F6F6] rounded-xl px-4 py-3 text-base text-foreground min-h-[80px]" /></Field>
+            <Field label="背景备注"><TextInput value={form.background} onChangeText={(t) => setForm({ ...form, background: t })} placeholder="性格/聊天风格/当前阶段" placeholderTextColor="#C9C9C9" multiline className="bg-on-surface rounded-xl px-4 py-3 text-base text-foreground min-h-[80px]" /></Field>
             <Text className="text-[13px] text-muted mb-1.5">重要日期</Text>
             {(form.dates || []).map((d: any, i: number) => (
               <View key={i} className="flex-row items-center mb-2 space-x-2">
-                <TextInput value={d.name} onChangeText={(t) => setForm({ ...form, dates: form.dates.map((x: any, idx: number) => idx === i ? { ...x, name: t } : x) })} placeholder="如：生日" placeholderTextColor="#C9C9C9" className="flex-1 bg-[#F6F6F6] rounded-xl px-4 h-11 text-[15px] text-foreground" />
-                <TextInput value={d.month_day} onChangeText={(t) => setForm({ ...form, dates: form.dates.map((x: any, idx: number) => idx === i ? { ...x, month_day: t } : x) })} placeholder="月-日" placeholderTextColor="#C9C9C9" className="w-24 bg-[#F6F6F6] rounded-xl px-2 h-11 text-[15px] text-foreground text-center" />
+                <TextInput value={d.name} onChangeText={(t) => setForm({ ...form, dates: form.dates.map((x: any, idx: number) => idx === i ? { ...x, name: t } : x) })} placeholder="如：生日" placeholderTextColor="#C9C9C9" className="flex-1 bg-on-surface rounded-xl px-4 h-11 text-[15px] text-foreground" />
+                <TextInput value={d.month_day} onChangeText={(t) => setForm({ ...form, dates: form.dates.map((x: any, idx: number) => idx === i ? { ...x, month_day: t } : x) })} placeholder="月-日" placeholderTextColor="#C9C9C9" className="w-24 bg-on-surface rounded-xl px-2 h-11 text-[15px] text-foreground text-center" />
                 <TouchableOpacity onPress={() => setForm({ ...form, dates: form.dates.filter((_: any, idx: number) => idx !== i) })} hitSlop={8}><Text className="text-danger">✕</Text></TouchableOpacity>
               </View>
             ))}
@@ -721,7 +863,7 @@ function EditPersonModal({ person, onClose, onSaved, onDeleted }: any) {
           </ScrollView>
           <TouchableOpacity onPress={delPerson} className="mt-3 self-center"><Text className="text-[13px] text-danger">删除此人物档案</Text></TouchableOpacity>
           <View className="flex-row space-x-3 mt-3">
-            <TouchableOpacity onPress={onClose} className="flex-1 h-12 rounded-xl bg-[#F1F1F1] items-center justify-center"><Text className="text-foreground font-medium">取消</Text></TouchableOpacity>
+            <TouchableOpacity onPress={onClose} className="flex-1 h-12 rounded-xl bg-on-surface items-center justify-center"><Text className="text-foreground font-medium">取消</Text></TouchableOpacity>
             <TouchableOpacity onPress={save} disabled={saving} className="flex-1 h-12 rounded-xl bg-foreground items-center justify-center"><Text className="text-white font-medium">{saving ? '保存中…' : '保存'}</Text></TouchableOpacity>
           </View>
         </View>

@@ -8,7 +8,11 @@ import { Pressable } from 'react-native';
 import { Screen } from '@/components/Screen';
 import { api } from '@/utils/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/contexts/ThemeContext';
 import { getDsKey, setDsKey } from '@/utils/deepseek';
+
+const APPEARANCES = ["light", "dark", "system"] as const;
+const APPEARANCE_LABEL: Record<string, string> = { light: '浅色', dark: '深色', system: '跟随系统' };
 
 const MODES = [
   { key: 'canned', title: '话术模式', desc: '给完整建议句子（默认）' },
@@ -35,6 +39,7 @@ export default function SettingsScreen() {
   const [keyVisible, setKeyVisible] = useState(false);
   const [keyEditing, setKeyEditing] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const { themeMode, setThemeMode } = useTheme();
 
   // 导出全部数据：人物 + 各人物分析记录 + 周报（Web 端下载 JSON，原生端走系统分享）
   const exportData = async () => {
@@ -214,6 +219,25 @@ export default function SettingsScreen() {
               )}
             </View>
           )}
+        </View>
+
+        {/* 外观 */}
+        <Text className="text-[15px] font-semibold text-foreground mt-2 mb-2">外观</Text>
+        <View className="bg-surface rounded-2xl p-4 mb-3 border border-border">
+          <Text className="text-[12px] text-muted mb-3">深色模式会让你晚上用起来更舒服</Text>
+          <View className="flex-row bg-on-surface rounded-full p-0.5">
+            {APPEARANCES.map((m) => (
+              <TouchableOpacity
+                key={m}
+                onPress={() => setThemeMode(m)}
+                className={`flex-1 h-9 rounded-full items-center justify-center ${themeMode === m ? 'bg-accent' : ''}`}
+              >
+                <Text className={`text-[13px] ${themeMode === m ? 'text-white font-semibold' : 'text-foreground/60'}`}>
+                  {APPEARANCE_LABEL[m]}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
 
         {/* 数据备份 */}

@@ -126,7 +126,7 @@ export default function RehearseScreen() {
             placeholder="例：为上次爽约道歉，并约好下周一起复习"
             placeholderTextColor="#9C9CA3"
             multiline
-            className="mt-4 bg-white border border-[#E5E5EA] rounded-2xl px-4 py-3 text-[15px] text-foreground min-h-[100px]"
+            className="mt-4 bg-surface border border-border rounded-2xl px-4 py-3 text-[15px] text-foreground min-h-[100px]"
           />
           <TouchableOpacity onPress={start} className="mt-5 bg-accent rounded-2xl py-4 items-center">
             <Text className="text-white font-semibold text-base">开始演练</Text>
@@ -165,7 +165,7 @@ export default function RehearseScreen() {
               </View>
             )}
             {feedback && (
-              <View className="rounded-2xl bg-white border border-[#E5E5EA] p-4 mb-3">
+              <View className="rounded-2xl bg-surface border border-border p-4 mb-3">
                 <View className="flex-row items-center justify-between mb-2">
                   <Text className="text-[14px] font-semibold text-foreground">演练复盘</Text>
                   <View className="px-2.5 py-1 rounded-full bg-accent/10">
@@ -194,7 +194,7 @@ export default function RehearseScreen() {
             )}
           </ScrollView>
 
-          <View className="px-4 pb-2 pt-1 border-t border-[#ECECEC] bg-white/95">
+          <View className="px-4 pb-2 pt-1 border-t border-border bg-surface/955">
             <View className="flex-row items-center gap-2 py-2">
               <TextInput
                 value={input}

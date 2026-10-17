@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { View, Text, ScrollView, TouchableOpacity, useWindowDimensions } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import { Screen } from "@/components/Screen";
 import { METHOD_CARDS, REPLY_PHRASES, INTENT_PHRASES, ACADEMY_FOOTER, type MethodCard } from "@/constants/methodologies";
@@ -58,6 +59,19 @@ function MethodPage({ card, index }: { card: MethodCard; index: number }) {
 export default function AcademyScreen() {
   const [active, setActive] = useState(0);
   const [tab, setTab] = useState<"method" | "phrase">("method");
+  const [favs, setFavs] = useState<string[]>([]);
+
+  useEffect(() => {
+    AsyncStorage.getItem("echo_mentor_fav_phrases").then((v) => {
+      try { setFavs(JSON.parse(v || "[]")); } catch { /* ignore */ }
+    });
+  }, [tab]);
+
+  const toggleFav = async (phrase: string) => {
+    const next = favs.includes(phrase) ? favs.filter((x) => x !== phrase) : [...favs, phrase];
+    setFavs(next);
+    try { await AsyncStorage.setItem("echo_mentor_fav_phrases", JSON.stringify(next)); } catch { /* ignore */ }
+  };
   const { width } = useWindowDimensions();
   const itemWidth = width;
 
@@ -70,7 +84,7 @@ export default function AcademyScreen() {
 
       {/* 顶栏：方法论 / 话术速查 */}
       <View className="px-5 pb-3">
-        <View className="flex-row bg-[#EFEFEF] rounded-full p-0.5 self-start">
+        <View className="flex-row bg-on-surface rounded-full p-0.5 self-start">
           {([["method", "方法论"], ["phrase", "话术速查"]] as const).map(([key, label]) => (
             <TouchableOpacity
               key={key}
@@ -120,13 +134,26 @@ export default function AcademyScreen() {
       ) : (
         <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20 }}>
           <Text className="px-1 pb-2 text-[12px] leading-5 text-foreground/50">
-            以下句式供直接参考。AI 分析时也会按场景与风格参考这些话术，再结合你的对话改写。
+            以下句式供直接参考（点 ☆ 收藏常用句，AI 会优先化用你的收藏）。
           </Text>
+          {favs.length > 0 && (
+            <View className="bg-surface rounded-2xl border border-accent/30 px-4 py-3 mb-4">
+              <Text className="text-[12px] font-semibold text-accent mb-1">我的收藏（{favs.length}）</Text>
+              {favs.map((p, i) => (
+                <View key={i} className="flex-row items-start mb-1">
+                  <Text className="flex-1 text-[13px] leading-5 text-foreground/85">· {p}</Text>
+                  <TouchableOpacity onPress={() => toggleFav(p)} hitSlop={8} className="ml-2">
+                    <Text className="text-[11px] text-muted">移除</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          )}
           {Object.entries(REPLY_PHRASES).map(([scene, styles]) => (
             <View key={scene} className="mb-4">
               <Text className="px-1 mb-2 text-[14px] font-semibold text-foreground">{scene}</Text>
               {Object.entries(styles).map(([style, phrases]) => (
-                <View key={style} className="bg-white rounded-2xl border border-[#E5E5EA] px-4 py-3 mb-2">
+                <View key={style} className="bg-surface rounded-2xl border border-border px-4 py-3 mb-2">
                   <Text className="text-[12px] font-semibold text-accent mb-1">{style}</Text>
                   {phrases.map((p, i) => (
                     <Text key={i} className="text-[13px] leading-5 text-foreground/85 mb-1">· {p}</Text>
@@ -137,11 +164,16 @@ export default function AcademyScreen() {
           ))}
           <Text className="px-1 pt-1 pb-2 text-[14px] font-semibold text-foreground">高频意图 · 跨场景</Text>
           {Object.entries(INTENT_PHRASES).map(([intent, v]) => (
-            <View key={intent} className="bg-white rounded-2xl border border-[#E5E5EA] px-4 py-3 mb-2">
+            <View key={intent} className="bg-surface rounded-2xl border border-border px-4 py-3 mb-2">
               <Text className="text-[13px] font-semibold text-foreground">{intent}</Text>
               <Text className="mt-0.5 text-[11px] leading-4 text-foreground/55">{v.tip}</Text>
               {v.phrases.map((p, i) => (
-                <Text key={i} className="mt-1.5 text-[13px] leading-5 text-foreground/85">· {p}</Text>
+                <View key={i} className="flex-row items-start mt-1.5">
+                  <Text className="flex-1 text-[13px] leading-5 text-foreground/85">· {p}</Text>
+                  <TouchableOpacity onPress={() => toggleFav(p)} hitSlop={8} className="ml-2">
+                    <Text className="text-[13px]">{favs.includes(p) ? "★" : "☆"}</Text>
+                  </TouchableOpacity>
+                </View>
               ))}
             </View>
           ))}

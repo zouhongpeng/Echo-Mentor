@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, ScrollView, Alert, ActivityIndicator, RefreshControl,
+  View, Text, TouchableOpacity, ScrollView, Alert, ActivityIndicator, RefreshControl, Platform,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { Screen } from '@/components/Screen';
@@ -8,7 +8,16 @@ import { api } from '@/utils/api';
 
 interface ReportItem {
   id: string;
-  content: { habits: string[]; trends: string[]; suggestions: string[]; progress: string[] };
+  content: {
+    summary?: string;
+    key_events?: string[];
+    habits?: string[];
+    otherTrend?: string;
+    improvements?: string[];
+    progress?: string[];
+    trends?: string[];
+    suggestions?: string[];
+  };
   created_at: string;
 }
 
@@ -34,6 +43,12 @@ export default function ReportScreen() {
     setGenerating(true);
     try {
       const rpt = await api.generateReport();
+      if (Platform.OS === 'web' && typeof Notification !== 'undefined') {
+        try {
+          if (Notification.permission === 'granted') new Notification('Echo Mentor', { body: '本周沟通周报已生成 ✅' });
+          else if (Notification.permission === 'default') { /* 不主动请求权限，避免打扰 */ }
+        } catch { /* ignore */ }
+      }
       Alert.alert('周报已生成');
       await load();
     } catch (e: any) {
@@ -76,15 +91,28 @@ export default function ReportScreen() {
           </View>
         ) : (
           list.map((r) => (
-            <View key={r.id} className="bg-white dark:bg-gray-800 rounded-3xl p-5 mb-4 shadow-sm border border-gray-100 dark:border-gray-700">
+            <View key={r.id} className="bg-surface rounded-3xl p-5 mb-4 shadow-sm border border-border">
               <View className="flex-row items-center justify-between mb-3">
                 <Text className="text-[15px] font-semibold text-gray-900 dark:text-white">{fmt(r.created_at)} 周报</Text>
                 <Text className="text-[11px] text-gray-400">自动周报</Text>
               </View>
-              <Section title="聊天习惯模式" items={r.content?.habits} icon="·" />
-              <Section title="对方回应趋势" items={r.content?.trends} icon="·" />
-              <Section title="改进建议" items={r.content?.suggestions} icon="·" />
-              <Section title="进步点" items={r.content?.progress} icon="✓" />
+              {!!r.content?.summary && (
+                <Text className="text-[13px] leading-5 text-gray-700 dark:text-gray-300 mb-3">{r.content.summary}</Text>
+              )}
+              {!!r.content?.key_events?.length && (
+                <Section title="本周关键事件" items={r.content.key_events} icon="★" />
+              )}
+              {!!r.content?.habits?.length && <Section title="聊天习惯模式" items={r.content.habits} icon="·" />}
+              {!!r.content?.otherTrend && (
+                <View className="mb-3">
+                  <Text className="text-[12px] font-semibold text-gray-500 dark:text-gray-400 mb-1">对方回应趋势</Text>
+                  <Text className="text-[13px] leading-5 text-gray-700 dark:text-gray-300">{r.content.otherTrend}</Text>
+                </View>
+              )}
+              {!!r.content?.trends?.length && <Section title="对方回应趋势" items={r.content.trends} icon="·" />}
+              {!!r.content?.improvements?.length && <Section title="改进建议" items={r.content.improvements} icon="·" />}
+              {!!r.content?.suggestions?.length && <Section title="改进建议" items={r.content.suggestions} icon="·" />}
+              {!!r.content?.progress?.length && <Section title="进步点" items={r.content.progress} icon="✓" />}
             </View>
           ))
         )}

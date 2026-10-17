@@ -71,6 +71,7 @@ ${buildPhraseSection()}`;
 4. 保持真实：允许润色语气，但绝对禁止建议编造虚假事实（伪造行程、捏造身份、虚构经历）。如果检测到用户想编造，温和提示："长久的关系靠真实"。
 5. 匿名化已由系统完成，你把聊天双方统一视作"我"和"对方"，不要在输出里编造真实姓名。
 6. 克制：如果这已经是同一个问题被反复追问，你可以提醒用户"先去做实际的事"。不要无限度地二次加工同一情境。
+7. 聊天记录可能包含多段不同时间的对话（以【第N段 · 日期】分隔），请按时间顺序综合分析，注意时间跨度、互动频率变化对关系温度判断的影响。
 
 【语言风格（硬性要求）】
 1. 说人话：禁止「首先/其次/总之」「值得一提的是」「从某种意义上说」「在……方面」等书面套话，禁止排比堆砌。
@@ -174,6 +175,29 @@ export const MODERATION_REPLY = "我上次的判断不会变，先去做别的�
  * 档案自动补全：从一次分析的聊天记录与想法中提炼关于对方的长期信息。
  * 失败时返回空数组（调用方静默跳过，不影响主流程）。
  */
+/**
+ * 时机提炼：从对话中发现未来可跟进的时机（考试/面试/生日/约定等）。
+ * 失败返回空数组（调用方静默跳过）。
+ */
+export async function extractTiming(chatRecord: string, myThought: string): Promise<{ opportunities: { when: string; what: string; suggestion: string }[] }> {
+  try {
+    const system = `你是日程助手。从聊天记录与用户想法中发现「未来可以跟进的时机」（考试、面试、生日、比赛、约定、TA 提过想做某事等）。
+严格输出 JSON：{"opportunities":[{"when":"大致时间，如 下周三/本月底","what":"是什么（20字内）","suggestion":"到时怎么开口（30字内，具体）"}]}
+最多 2 条，没有则返回 {"opportunities":[]}。不编造。`;
+    const result = await chat(system, `【聊天记录】\n${chatRecord || "（空）"}\n\n【我的想法】\n${myThought || "（空）"}`, 0.4);
+    const parsed = extractJson(result.content) as { opportunities?: unknown } | null;
+    if (!parsed || !Array.isArray(parsed.opportunities)) return { opportunities: [] };
+    return {
+      opportunities: parsed.opportunities
+        .filter((o: any) => o && typeof o.when === "string" && typeof o.what === "string")
+        .slice(0, 2)
+        .map((o: any) => ({ when: String(o.when), what: String(o.what), suggestion: String(o.suggestion || "") })),
+    };
+  } catch {
+    return { opportunities: [] };
+  }
+}
+
 export async function extractProfileFacts(chatRecord: string, myThought: string): Promise<string[]> {
   try {
     const system = `你是关系档案管理员。从聊天记录与用户想法中，提炼关于「对方」的长期有用信息（喜好、忌讳、近况、重要日期线索、相处边界、沟通风格）。

@@ -9,7 +9,7 @@ import path from "path";
 
 import { getSupabaseClient } from "./storage/database/supabase-client";
 import { memoryDb } from "./storage/database/memory-db";
-import { runAnalysis, prepareAnonymized, summerizeRecords, shouldModerate, extractProfileFacts, MODERATION_REPLY, type GrowthMode } from "./ai/analysis";
+import { runAnalysis, prepareAnonymized, summerizeRecords, shouldModerate, extractProfileFacts, extractTiming, MODERATION_REPLY, type GrowthMode } from "./ai/analysis";
 import { recognizeImage, chat, extractJson } from "./ai/deepseek";
 import { generateWeeklyReport } from "./ai/report";
 import { sha256, anonymize } from "./ai/anonymize";
@@ -376,6 +376,21 @@ app.post("/api/v1/analyze", requirePin, async (req, res) => {
             console.error("档案补全失败（静默）:", e);
           }
         })();
+
+        // 时机提醒提炼：从对话中发现未来可跟进的时机（尽力而为）
+        (async () => {
+          try {
+            const timing = await extractTiming(anonymized.chatRecord, anonymized.myThought);
+            if (!timing.opportunities?.length) return;
+            const { data: rec2, error: e2 } = await db.from("analysis_records").select("result").eq("id", recordId).maybeSingle();
+            if (e2 || !rec2) return;
+            const merged = { ...(rec2.result || {}), timing };
+            await db.from("analysis_records").update({ result: merged }).eq("id", recordId);
+            console.log(`[timing] 人物 ${body.person_id} 提炼时机 ${timing.opportunities.length} 条`);
+          } catch (e) {
+            console.error("时机提炼失败（静默）:", e);
+          }
+        })();
       } catch (err) {
         await db.from("analysis_records").update({ status: "failed" }).eq("id", recordId);
         console.error("AI 分析失败:", err);
@@ -450,6 +465,35 @@ app.put("/api/v1/analysis/:id/mark", requirePin, async (req, res) => {
     ok(res, { success: true });
   } catch (e: any) {
     fail(res, e?.message || "标记失败", 400);
+  }
+});
+
+// ============ 回复效果复盘 ============
+app.post("/api/v1/analysis/:id/outcome", requirePin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const theirReply = String(req.body?.their_reply ?? "").trim();
+    if (!theirReply) return fail(res, "请填写对方的回应", 400);
+    const { data: rec, error } = await db.from("analysis_records").select("result, chat_input").eq("id", id).maybeSingle();
+    if (error) throw error;
+    if (!rec) return fail(res, "记录不存在", 404);
+    const result = rec.result || {};
+    const usedReplies = (result.suggestions ?? [])
+      .map((sg: any, i: number) => ({ text: sg?.text, used: !!(result.marks ?? {})[String(i)] }))
+      .filter((x: any) => x.used)
+      .map((x: any) => x.text);
+    const system = `你是沟通教练。用户此前采纳了你给的建议并发出，现在对方有了回应。请评估这条回复的实际效果。
+严格输出 JSON：{"effect":"好|一般|翻车","reason":"一句话依据（引用对方回应）","lesson":"下次怎么微调（一句话，具体）"}`;
+    const user = `【当时的聊天记录】\n${rec.chat_input || "（无）"}\n\n【用户发出的回复】\n${usedReplies.join("\n") || "（未记录）"}\n\n【对方的回应】\n${theirReply}`;
+    const result2 = await chat(system, user, 0.4);
+    const parsed = extractJson(result2.content);
+    if (!parsed) return fail(res, "评估失败，请稍后再试", 500, 500);
+    result.outcome = { ...parsed, their_reply: theirReply, evaluated_at: new Date().toISOString() };
+    const { error: e2 } = await db.from("analysis_records").update({ result }).eq("id", id);
+    if (e2) throw e2;
+    ok(res, { outcome: result.outcome });
+  } catch (e: any) {
+    fail(res, e?.message || "评估失败", 500, 500);
   }
 });
 

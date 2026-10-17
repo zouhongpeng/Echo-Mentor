@@ -2,6 +2,7 @@ import { Stack } from 'expo-router';
 import { LogBox } from 'react-native';
 import Toast from 'react-native-toast-message';
 import { Provider } from '@/components/Provider';
+import { ThemeProvider } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import PinScreen from '@/screens/pin';
 
@@ -22,7 +23,8 @@ function LockGate() {
 
 export default function RootLayout() {
   return (
-    <Provider>
+    <ThemeProvider>
+      <Provider>
       <Stack
         screenOptions={{
           animation: 'slide_from_right',
@@ -37,6 +39,7 @@ export default function RootLayout() {
       </Stack>
       <LockGate />
       <Toast />
-    </Provider>
+      </Provider>
+    </ThemeProvider>
   );
 }

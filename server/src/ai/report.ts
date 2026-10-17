@@ -20,6 +20,7 @@ export async function generateWeeklyReport(context: {
   weekSummary: string;
 }): Promise<{
   summary: string;
+  key_events: string[];
   habits: string[];
   otherTrend: string;
   improvements: string[];
@@ -29,6 +30,7 @@ export async function generateWeeklyReport(context: {
 输出严格 JSON，不要多余文字：
 {
   "summary": "本周整体概况（1-3 句）",
+  "key_events": ["本周最重要的互动事件，各 ≤30 字（1-3 条）"],
   "habits": ["我的聊天习惯模式，如秒回倾向、话题终结点等（0-3条）"],
   "otherTrend": "对方回应趋势（1-2 句）",
   "improvements": ["1-2 条具体改进建议"],

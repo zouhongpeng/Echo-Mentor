@@ -174,7 +174,7 @@ export default function HomeScreen() {
           onChangeText={setQuery}
           placeholder="搜索称呼或关系…"
           placeholderTextColor="#9C9CA3"
-          className="bg-[#E9E9EE] rounded-xl px-4 h-10 text-[15px] text-foreground"
+          className="bg-on-surface rounded-xl px-4 h-10 text-[15px] text-foreground"
         />
       </View>
 
@@ -184,7 +184,7 @@ export default function HomeScreen() {
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 8 }}>
             <TouchableOpacity
               onPress={() => setFilterRel(null)}
-              className={`px-3.5 h-8 rounded-full items-center justify-center ${filterRel === null ? 'bg-foreground' : 'bg-white border border-[#E5E5EA]'}`}
+              className={`px-3.5 h-8 rounded-full items-center justify-center ${filterRel === null ? 'bg-foreground' : 'bg-surface border border-border'}`}
             >
               <Text className={`text-[12.5px] ${filterRel === null ? 'text-white font-medium' : 'text-foreground/70'}`}>全部</Text>
             </TouchableOpacity>
@@ -192,7 +192,7 @@ export default function HomeScreen() {
               <TouchableOpacity
                 key={r}
                 onPress={() => setFilterRel(filterRel === r ? null : r)}
-                className={`px-3.5 h-8 rounded-full items-center justify-center ${filterRel === r ? 'bg-accent' : 'bg-white border border-[#E5E5EA]'}`}
+                className={`px-3.5 h-8 rounded-full items-center justify-center ${filterRel === r ? 'bg-accent' : 'bg-surface border border-border'}`}
               >
                 <Text className={`text-[12.5px] ${filterRel === r ? 'text-white font-medium' : 'text-foreground/70'}`}>{r}</Text>
               </TouchableOpacity>
@@ -246,7 +246,7 @@ export default function HomeScreen() {
           )
         }
         renderItem={({ item }) => (
-          <View className="bg-white rounded-2xl px-4 py-4 mb-3 border border-[#F0F0F0]">
+          <View className="bg-surface rounded-2xl px-4 py-4 mb-3 border border-border">
             {/* 卡片主体：点头像区进详情 */}
             <TouchableOpacity
               activeOpacity={0.7}
@@ -308,7 +308,7 @@ export default function HomeScreen() {
       {/* 档案 Modal */}
       <Modal visible={showModal} transparent animationType="slide" onRequestClose={() => setShowModal(false)}>
         <View className="flex-1 bg-black/30 justify-end">
-          <View className="bg-white rounded-t-3xl p-6 pb-8 max-h-[88%]">
+          <View className="bg-surface rounded-t-3xl p-6 pb-8 max-h-[88%]">
             <View className="flex-row items-center justify-between mb-5">
               <Text className="text-xl font-bold text-foreground">{editing ? '编辑档案' : '新增人物'}</Text>
               <TouchableOpacity onPress={() => setShowModal(false)} hitSlop={10}>
@@ -323,7 +323,7 @@ export default function HomeScreen() {
                 onChangeText={(t) => setForm({ ...form, name: t })}
                 placeholder="如：安安 / 张老师"
                 placeholderTextColor="#C9C9C9"
-                className="bg-[#F6F6F6] rounded-xl px-4 h-12 text-base text-foreground mb-4"
+                className="bg-on-surface rounded-xl px-4 h-12 text-base text-foreground mb-4"
               />
               <Text className="text-[13px] text-muted mb-1.5">关系<Text className="text-muted/60">（选填）</Text></Text>
               <View className="flex-row flex-wrap mb-2">
@@ -331,7 +331,7 @@ export default function HomeScreen() {
                   <TouchableOpacity
                     key={r}
                     onPress={() => setForm({ ...form, relationship: r })}
-                    className={`px-3 h-8 rounded-full items-center justify-center mr-2 mb-2 ${form.relationship === r ? 'bg-accent' : 'bg-[#F6F6F6]'}`}
+                    className={`px-3 h-8 rounded-full items-center justify-center mr-2 mb-2 ${form.relationship === r ? 'bg-accent' : 'bg-on-surface'}`}
                   >
                     <Text className={`text-[13px] ${form.relationship === r ? 'text-white font-medium' : 'text-foreground/70'}`}>{r}</Text>
                   </TouchableOpacity>
@@ -342,7 +342,7 @@ export default function HomeScreen() {
                 onChangeText={(t) => setForm({ ...form, relationship: t })}
                 placeholder="也可以自己写，如：打球认识的 / 表姐"
                 placeholderTextColor="#C9C9C9"
-                className="bg-[#F6F6F6] rounded-xl px-4 h-12 text-base text-foreground mb-4"
+                className="bg-on-surface rounded-xl px-4 h-12 text-base text-foreground mb-4"
               />
               <Text className="text-[13px] text-muted mb-1.5">头像颜色</Text>
               <View className="flex-row flex-wrap mb-4">
@@ -359,7 +359,7 @@ export default function HomeScreen() {
                 placeholder="想到什么写什么，帮 AI 更懂这个人。如：外向爱开玩笑，最近在忙提案"
                 placeholderTextColor="#C9C9C9"
                 multiline
-                className="bg-[#F6F6F6] rounded-xl px-4 py-3 text-base text-foreground min-h-[90px] mb-4"
+                className="bg-on-surface rounded-xl px-4 py-3 text-base text-foreground min-h-[90px] mb-4"
               />
               <Text className="text-[12px] text-muted/80 mb-4">只填称呼就能保存，其他以后随时补。</Text>
 
@@ -381,14 +381,14 @@ export default function HomeScreen() {
                     onChangeText={(t) => updateDate(i, { name: t })}
                     placeholder="如：生日"
                     placeholderTextColor="#C9C9C9"
-                    className="flex-1 bg-[#F6F6F6] rounded-xl px-4 h-11 text-[15px] text-foreground"
+                    className="flex-1 bg-on-surface rounded-xl px-4 h-11 text-[15px] text-foreground"
                   />
                   <TextInput
                     value={d.month_day}
                     onChangeText={(t) => updateDate(i, { month_day: t })}
                     placeholder="月-日"
                     placeholderTextColor="#C9C9C9"
-                    className="w-28 bg-[#F6F6F6] rounded-xl px-3 h-11 text-[15px] text-foreground text-center"
+                    className="w-28 bg-on-surface rounded-xl px-3 h-11 text-[15px] text-foreground text-center"
                   />
                   <TouchableOpacity onPress={() => setForm({ ...form, dates: form.dates.filter((_, idx) => idx !== i) })} hitSlop={8}>
                     <Text className="text-danger">✕</Text>
@@ -400,7 +400,7 @@ export default function HomeScreen() {
             <View className="flex-row space-x-3 mt-4">
               <TouchableOpacity
                 onPress={() => setShowModal(false)}
-                className="flex-1 h-12 rounded-xl bg-[#F1F1F1] items-center justify-center"
+                className="flex-1 h-12 rounded-xl bg-on-surface items-center justify-center"
               >
                 <Text className="text-foreground font-medium">取消</Text>
               </TouchableOpacity>

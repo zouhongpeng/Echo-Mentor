@@ -3,6 +3,7 @@ import {
   View, Text, TouchableOpacity, TextInput, ScrollView, Alert, ActivityIndicator, Platform, Modal, StyleSheet,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 import { useSafeRouter, useSafeSearchParams } from '@/hooks/useSafeRouter';
@@ -15,6 +16,7 @@ import { getDsKey, analyzeDirect, analyzeDirectStream, progressiveExtract, saveC
 interface AnalyzeProps {
   person_id: string;
   person_name?: string;
+  prefill_note?: string;
 }
 
 const TEMP_COLOR: Record<string, string> = { 热: '#E4572E', 温: '#C9A227', 冷: '#7A9BCE' };
@@ -46,6 +48,11 @@ export default function AnalyzeScreen() {
   const [ghost, setGhost] = useState<{ thoughts: string[]; suggestions: string[] }>({ thoughts: [], suggestions: [] });
   const [stageIdx, setStageIdx] = useState(0);
   const [tone, setTone] = useState<'正式' | '日常' | '熟昵'>('日常');
+  // 快记预填「我的想法」
+  useEffect(() => {
+    if (params.prefill_note) setThoughtInput(params.prefill_note);
+  }, [params.prefill_note]);
+
   useEffect(() => {
     if (!loading) { setStageIdx(0); return; }
     const iv = setInterval(() => setStageIdx((i) => Math.min(i + 1, ANALYZE_STAGES.length - 1)), 6000);
@@ -66,23 +73,45 @@ export default function AnalyzeScreen() {
         });
       }
       (list || []).slice(0, 3).forEach((r: any) => { if (r.thought_input) out.push(r.thought_input); });
-      return out.length ? out.slice(0, 8) : undefined;
+      try {
+        const favs = JSON.parse((await AsyncStorage.getItem('echo_mentor_fav_phrases')) || '[]');
+        favs.slice(0, 5).forEach((f: string) => out.unshift(`（常用语）${f}`));
+      } catch { /* ignore */ }
+      return out.length ? out.slice(0, 10) : undefined;
     } catch { return undefined; }
   };
 
-  // 对话输入模式：bubble=逐句标说话人 / paste=整段粘贴
+  // 对话输入模式：bubble=逐句标说话人（支持多段落/多天合并）/ paste=整段粘贴
   const [inputMode, setInputMode] = useState<'bubble' | 'paste'>('bubble');
-  const [msgs, setMsgs] = useState<{ speaker: 'me' | 'them'; text: string }[]>([
-    { speaker: 'them', text: '' },
-    { speaker: 'me', text: '' },
+  type Msg = { speaker: 'me' | 'them'; text: string };
+  const [segments, setSegments] = useState<{ date: string; items: Msg[] }[]>([
+    { date: '', items: [{ speaker: 'them', text: '' }, { speaker: 'me', text: '' }] },
   ]);
   const buildMsgText = () =>
-    msgs
-      .filter((m) => m.text.trim())
-      .map((m) => `${m.speaker === 'me' ? '我' : personName}：${m.text.trim()}`)
-      .join('\n');
-  const updateMsg = (i: number, patch: Partial<{ speaker: 'me' | 'them'; text: string }>) =>
-    setMsgs((ms) => ms.map((m, idx) => (idx === i ? { ...m, ...patch } : m)));
+    segments
+      .map((seg, si) => {
+        const lines = seg.items
+          .filter((m) => m.text.trim())
+          .map((m) => `${m.speaker === 'me' ? '我' : personName}：${m.text.trim()}`)
+          .join('\n');
+        if (!lines) return '';
+        const header = segments.length > 1 || seg.date.trim() ? `【第${si + 1}段${seg.date.trim() ? ` · ${seg.date.trim()}` : ''}】\n` : '';
+        return header + lines;
+      })
+      .filter(Boolean)
+      .join('\n\n');
+  const updateMsg = (si: number, mi: number, patch: Partial<Msg>) =>
+    setSegments((segs) => segs.map((seg, i) => (i === si ? { ...seg, items: seg.items.map((m, j) => (j === mi ? { ...m, ...patch } : m)) } : seg)));
+  const addMsg = (si: number) =>
+    setSegments((segs) => segs.map((seg, i) => {
+      if (i !== si) return seg;
+      const last = seg.items[seg.items.length - 1];
+      return { ...seg, items: [...seg.items, { speaker: last?.speaker === 'me' ? 'them' : 'me', text: '' }] };
+    }));
+  const delMsg = (si: number, mi: number) =>
+    setSegments((segs) => segs.map((seg, i) => (i === si ? { ...seg, items: seg.items.filter((_, j) => j !== mi) } : seg)));
+  const addSegment = () => setSegments((segs) => [...segs, { date: '', items: [{ speaker: 'them', text: '' }, { speaker: 'me', text: '' }] }]);
+  const removeSegment = (si: number) => setSegments((segs) => segs.filter((_, i) => i !== si));
 
   // 截图识别
   const [picking, setPicking] = useState(false);
@@ -280,7 +309,7 @@ export default function AnalyzeScreen() {
           <View className="flex-row items-center justify-between mb-2">
             <Text className="text-[15px] font-semibold text-foreground">聊天记录</Text>
             <View className="flex-row items-center">
-              <View className="flex-row bg-[#F1F1F1] rounded-full p-0.5 mr-2">
+              <View className="flex-row bg-on-surface rounded-full p-0.5 mr-2">
                 <TouchableOpacity
                   onPress={() => setInputMode('bubble')}
                   className={`px-3 h-7 rounded-full items-center justify-center ${inputMode === 'bubble' ? 'bg-white shadow-sm' : ''}`}
@@ -312,52 +341,80 @@ export default function AnalyzeScreen() {
             />
           ) : (
             <View>
-              {msgs.map((m, i) => {
-                const mine = m.speaker === 'me';
-                return (
-                  <View key={i} className={`flex-row items-start mb-3 ${mine ? 'justify-end' : ''}`}>
-                    {/* 头像：对方靠左，我靠右（微信式） */}
-                    {!mine && <ChatAvatar label={personName.charAt(0) || 'TA'} color="#7A9BCE" />}
-                    <View style={{ maxWidth: '68%', paddingHorizontal: 6 }}>
+              {segments.map((seg, si) => (
+                <View key={si}>
+                  {(segments.length > 1 || seg.date.trim()) && (
+                    <View className="flex-row items-center justify-between mb-2 mt-1">
                       <TextInput
-                        value={m.text}
-                        onChangeText={(t) => updateMsg(i, { text: t })}
-                        placeholder={mine ? '我说的…' : `${personName}说的…`}
-                        placeholderTextColor="#9CA3AF"
-                        multiline
-                        textAlignVertical="center"
-                        style={{
-                          backgroundColor: mine ? '#95EC69' : '#FFFFFF',
-                          borderColor: mine ? '#86DB5B' : '#E6E6E6',
-                          borderWidth: 1,
-                          borderRadius: 8,
-                          paddingHorizontal: 12,
-                          paddingVertical: 9,
-                          fontSize: 15,
-                          color: '#111111',
-                        }}
+                        value={seg.date}
+                        onChangeText={(t) => setSegments((segs) => segs.map((x, i) => (i === si ? { ...x, date: t } : x)))}
+                        placeholder={`第 ${si + 1} 段日期，如：10月15日（选填）`}
+                        placeholderTextColor="#9C9CA3"
+                        className="flex-1 bg-on-surface rounded-full px-3.5 h-8 text-[12px] text-foreground border border-border"
                       />
+                      {segments.length > 1 && (
+                        <TouchableOpacity onPress={() => removeSegment(si)} hitSlop={6} className="ml-2">
+                          <Text className="text-muted text-[12px]">✕ 删段</Text>
+                        </TouchableOpacity>
+                      )}
                     </View>
-                    {mine && <ChatAvatar label="我" color="#FF7A5C" />}
-                    {/* 切换说话人（点头像）+ 删除 */}
-                    <TouchableOpacity onPress={() => updateMsg(i, { speaker: mine ? 'them' : 'me' })} hitSlop={6} className="ml-1 mt-2">
-                      <Text className="text-[10px] text-muted">换</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => setMsgs((ms) => ms.filter((_, idx) => idx !== i))} hitSlop={6} className="ml-1 mt-2">
-                      <Text className="text-muted text-[12px]">✕</Text>
-                    </TouchableOpacity>
-                  </View>
-                );
-              })}
-              <View className="flex-row items-center justify-between mt-1">
+                  )}
+                  {seg.items.map((m, mi) => {
+                    const mine = m.speaker === 'me';
+                    return (
+                      <View key={mi} className={`flex-row items-start mb-3 ${mine ? 'justify-end' : ''}`}>
+                        {/* 头像：对方靠左，我靠右（微信式） */}
+                        {!mine && <ChatAvatar label={personName.charAt(0) || 'TA'} color="#7A9BCE" />}
+                        <View style={{ maxWidth: '68%', paddingHorizontal: 6 }}>
+                          <TextInput
+                            value={m.text}
+                            onChangeText={(t) => updateMsg(si, mi, { text: t })}
+                            placeholder={mine ? '我说的…' : `${personName}说的…`}
+                            placeholderTextColor="#9CA3AF"
+                            multiline
+                            textAlignVertical="center"
+                            style={{
+                              backgroundColor: mine ? '#95EC69' : '#FFFFFF',
+                              borderColor: mine ? '#86DB5B' : '#E6E6E6',
+                              borderWidth: 1,
+                              borderRadius: 8,
+                              paddingHorizontal: 12,
+                              paddingVertical: 9,
+                              fontSize: 15,
+                              color: '#111111',
+                            }}
+                          />
+                        </View>
+                        {mine && <ChatAvatar label="我" color="#FF7A5C" />}
+                        {/* 切换说话人（点头像）+ 删除 */}
+                        <TouchableOpacity onPress={() => updateMsg(si, mi, { speaker: mine ? 'them' : 'me' })} hitSlop={6} className="ml-1 mt-2">
+                          <Text className="text-[10px] text-muted">换</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => delMsg(si, mi)} hitSlop={6} className="ml-1 mt-2">
+                          <Text className="text-muted text-[12px]">✕</Text>
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  })}
+                  <TouchableOpacity
+                    onPress={() => addMsg(si)}
+                    className="mt-1 mb-2 self-start px-3 h-7 rounded-full bg-accent-soft items-center justify-center"
+                  >
+                    <Text className="text-[11px] text-accent font-medium">＋ 本段加一句</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+              <View className="flex-row items-center justify-between mt-1 flex-wrap gap-2">
                 <TouchableOpacity
-                  onPress={() => setMsgs((ms) => [...ms, { speaker: ms[ms.length - 1]?.speaker === 'me' ? 'them' : 'me', text: '' }])}
+                  onPress={addSegment}
                   className="self-start px-3 h-8 rounded-full bg-accent-soft items-center justify-center"
                 >
-                  <Text className="text-[12px] text-accent font-medium">＋ 添加一句</Text>
+                  <Text className="text-[12px] text-accent font-medium">＋ 添加段落（不同时间的聊天）</Text>
                 </TouchableOpacity>
-                <Text className="text-[10px] text-muted/70">点头像旁边的「换」可切换谁说的</Text>
               </View>
+              <Text className="mt-2 text-[10px] text-muted/70">
+                点「换」切换说话人；多天的聊天建议分不同段落，AI 会按时间线综合分析
+              </Text>
             </View>
           )}
         </View>
@@ -385,7 +442,7 @@ export default function AnalyzeScreen() {
             <Text className="text-[15px] font-semibold text-foreground">建议的语气</Text>
             <Text className="ml-1.5 text-[11px] text-muted">AI 会按这个感觉生成建议</Text>
           </View>
-          <View className="flex-row bg-[#EFEFEF] rounded-full p-0.5">
+          <View className="flex-row bg-on-surface rounded-full p-0.5">
             {(['正式', '日常', '熟昵'] as const).map((t) => (
               <TouchableOpacity
                 key={t}
@@ -417,7 +474,7 @@ export default function AnalyzeScreen() {
               </View>
             ))}
             {!!streamText && (
-              <View className="mt-2 rounded-xl bg-[#F6F6F8] px-3 py-2">
+              <View className="mt-2 rounded-xl bg-on-surface px-3 py-2">
                 <Text className="text-[11px] font-semibold text-foreground/60 mb-1">实时预览</Text>
                 <ScrollView style={{ maxHeight: 130 }}>
                   {ghost.thoughts.map((t, i) => (
@@ -532,6 +589,9 @@ function ResultView({ result, marks, onCopy, onMark }: any) {
       </View>
 
       <View className="px-3.5 pt-2 pb-5">
+        {/* 分享卡（Web 端下载 PNG） */}
+        <ShareCard result={result} />
+
         {/* 对面在想什么 → 对方气泡（左侧，带头像） */}
         <View className="items-center pb-2">
           <Text className="text-[11px] text-[#9C9C9C]">以下是他心里的想法</Text>
@@ -579,7 +639,7 @@ function ResultView({ result, marks, onCopy, onMark }: any) {
                     <View className="mt-1.5 items-end">
                       <TouchableOpacity
                         onPress={() => setOpenTheory(openTheory === `s${i}` ? null : `s${i}`)}
-                        className="flex-row items-center rounded-full bg-white/80 px-3 py-1 border border-border"
+                        className="flex-row items-center rounded-full bg-surface/900 px-3 py-1 border border-border"
                         hitSlop={6}
                       >
                         <Text className="text-[11px] font-medium text-accent">依据：{s.theory_tag}</Text>
@@ -628,6 +688,72 @@ function Section({ title, hint, children }: any) {
       <Text className="text-[15px] font-semibold text-foreground mb-2">{title}</Text>
       {!!hint && <Text className="text-[11px] text-muted mb-2">{hint}</Text>}
       {children}
+    </View>
+  );
+}
+
+/** 分析结果分享卡：Web 端通过 html-to-image（CDN）导出 PNG；脱敏——不含聊天原文 */
+function ShareCard({ result }: { result: any }) {
+  const ref = React.useRef<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const exportPng = async () => {
+    if (Platform.OS !== 'web' || !ref.current) {
+      Alert.alert('提示', '请在网页版使用图片导出；App 内可截图分享');
+      return;
+    }
+    setBusy(true);
+    try {
+      const w = window as any;
+      if (!w.htmlToImage) {
+        await new Promise<void>((res, rej) => {
+          const sc = document.createElement('script');
+          sc.src = 'https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js';
+          sc.onload = () => res();
+          sc.onerror = () => rej(new Error('组件加载失败'));
+          document.head.appendChild(sc);
+        });
+      }
+      const dataUrl = await w.htmlToImage.toPng(ref.current, { pixelRatio: 2, backgroundColor: '#0b1128' });
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `echo-mentor-分享卡-${new Date().toISOString().slice(0, 10)}.png`;
+      a.click();
+      setDone(true);
+      setTimeout(() => setDone(false), 2000);
+    } catch (e: any) {
+      Alert.alert('导出失败', e?.message || '请稍后再试');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const first = result?.suggestions?.[0];
+  const date = new Date().toISOString().slice(0, 10);
+
+  return (
+    <View>
+      <TouchableOpacity onPress={exportPng} disabled={busy} className="self-end px-3 h-7 rounded-full bg-accent-soft items-center justify-center mb-2">
+        {busy ? <ActivityIndicator size="small" color="#E4572E" /> : <Text className="text-[11px] text-accent font-medium">{done ? '已保存 ✓' : '🖼 生成分享图'}</Text>}
+      </TouchableOpacity>
+      {/* 仅 Web 渲染离屏卡片；App 端提示截图 */}
+      {Platform.OS === 'web' && (
+        <View ref={ref} collapsable={false} style={{ position: 'absolute', left: -9999, top: 0, width: 360, backgroundColor: '#0b1128', borderRadius: 16, padding: 20 }}>
+          <Text style={{ color: '#5BC0DE', fontSize: 12, letterSpacing: 2 }}>ECHO MENTOR · 需求拆解师</Text>
+          <Text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: '700', marginTop: 8 }}>{result?.scene || '沟通分析'} · 关系温度 {result?.temperature?.label || '—'}</Text>
+          {!!result?.thoughts?.[0]?.point && (
+            <Text style={{ color: '#C9D6F0', fontSize: 12, marginTop: 10, lineHeight: 18 }}>洞察：{result.thoughts[0].point}</Text>
+          )}
+          {!!first?.text && (
+            <View style={{ backgroundColor: '#95EC69', borderRadius: 8, padding: 10, marginTop: 12 }}>
+              <Text style={{ color: '#111111', fontSize: 12, lineHeight: 17 }}>{first.text}</Text>
+            </View>
+          )}
+          <Text style={{ color: '#6b7c96', fontSize: 10, marginTop: 14 }}>我清楚地表达了自己的想法 —— Echo Mentor 帮我做到的</Text>
+          <Text style={{ color: '#4a5a75', fontSize: 10, marginTop: 4 }}>{date}</Text>
+        </View>
+      )}
     </View>
   );
 }
