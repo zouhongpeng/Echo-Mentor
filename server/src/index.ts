@@ -4,10 +4,13 @@ import cors from "cors";
 import multer from "multer";
 import { z } from "zod";
 import dayjs from "dayjs";
+import fsSync from "fs";
+import path from "path";
 
 import { getSupabaseClient } from "./storage/database/supabase-client";
-import { runAnalysis, prepareAnonymized, summerizeRecords, shouldModerate, MODERATION_REPLY, type GrowthMode } from "./ai/analysis";
-import { recognizeImage } from "./ai/deepseek";
+import { memoryDb } from "./storage/database/memory-db";
+import { runAnalysis, prepareAnonymized, summerizeRecords, shouldModerate, extractProfileFacts, MODERATION_REPLY, type GrowthMode } from "./ai/analysis";
+import { recognizeImage, chat, extractJson } from "./ai/deepseek";
 import { generateWeeklyReport } from "./ai/report";
 import { sha256, anonymize } from "./ai/anonymize";
 
@@ -19,7 +22,15 @@ app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-const db = getSupabaseClient();
+// 数据库：优先 Supabase（扣子环境注入凭据）；不可用时降级为内存存储（演示模式，重启即清空）
+let db: any;
+try {
+  db = getSupabaseClient();
+  console.log("[db] Supabase 已连接");
+} catch (e: any) {
+  db = memoryDb;
+  console.log(`[db] Supabase 未配置（${e?.message ?? e}），降级为内存存储（演示模式，重启即清空）`);
+}
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 // ============ 工具 ============
@@ -262,6 +273,8 @@ app.post("/api/v1/analyze", requirePin, async (req, res) => {
       chat_input: z.string().optional().default(""),
       thought_input: z.string().optional().default(""),
       my_reply: z.string().optional().default(""), // 点评模式下用户自己的回复
+      style_examples: z.array(z.string()).optional().default([]), // 风格学习：过往采纳回复/本人想法
+      tone: z.string().optional(),
     });
     const body = schema.parse(req.body);
 
@@ -327,6 +340,10 @@ app.post("/api/v1/analyze", requirePin, async (req, res) => {
           chatRecord: anonymized.chatRecord,
           myThought: anonymized.myThought,
           growthMode,
+          tone: body.tone,
+          styleExamples: (body.style_examples ?? []).length
+            ? body.style_examples.map((s: string) => anonymize(s, person.name)).join("\n")
+            : undefined,
         });
         const { error } = await db.from("analysis_records").update({
           result: outcome as any,
@@ -341,6 +358,24 @@ app.post("/api/v1/analyze", requirePin, async (req, res) => {
           label: outcome.temperature.label,
           reason: outcome.temperature.reason,
         });
+
+        // 档案自动补全：提炼新信息合并进人物背景（尽力而为，失败静默）
+        (async () => {
+          try {
+            const facts = await extractProfileFacts(anonymized.chatRecord, anonymized.myThought);
+            if (!facts.length) return;
+            const { data: p, error: pe } = await db.from("people").select("background").eq("id", body.person_id).maybeSingle();
+            if (pe || !p) return;
+            const oldBg = (p.background as string) || "";
+            const fresh = facts.filter((f) => !oldBg.includes(f));
+            if (!fresh.length) return;
+            const merged = oldBg ? `${oldBg}\n${fresh.join("；")}` : fresh.join("；");
+            await db.from("people").update({ background: merged }).eq("id", body.person_id);
+            console.log(`[profile] 人物 ${body.person_id} 档案自动补全 ${fresh.length} 条`);
+          } catch (e) {
+            console.error("档案补全失败（静默）:", e);
+          }
+        })();
       } catch (err) {
         await db.from("analysis_records").update({ status: "failed" }).eq("id", recordId);
         console.error("AI 分析失败:", err);
@@ -419,6 +454,45 @@ app.put("/api/v1/analysis/:id/mark", requirePin, async (req, res) => {
 });
 
 // ============ 时间线 ============
+// 调整时间线显示顺序：与相邻记录交换 created_at（up=显示更靠前，down=更靠后）
+app.patch("/api/v1/analysis/:id/move", requirePin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const direction = req.body?.direction === "up" || req.body?.direction === "down" ? req.body.direction : null;
+    if (!direction) return fail(res, "direction 必须是 up 或 down", 400);
+    const { data: cur, error: e1 } = await db
+      .from("analysis_records")
+      .select("id, person_id, created_at")
+      .eq("id", id)
+      .maybeSingle();
+    if (e1) throw e1;
+    if (!cur) return fail(res, "记录不存在", 404);
+    // 接口按创建时间升序取全量，便于找相邻项
+    const { data: list, error: e2 } = await db
+      .from("analysis_records")
+      .select("id, created_at")
+      .eq("person_id", cur.person_id)
+      .order("created_at", { ascending: true });
+    if (e2) throw e2;
+    const arr = list ?? [];
+    const ascIdx = arr.findIndex((r: any) => r.id === id);
+    if (ascIdx < 0) return fail(res, "记录不存在", 404);
+    // 前端时间线按时间倒序展示：显示层"上移"= 时间上更新 = 升序数组中 +1
+    const ascNeighbor = direction === "up" ? ascIdx + 1 : ascIdx - 1;
+    if (ascNeighbor < 0 || ascNeighbor >= arr.length) {
+      return ok(res, { success: true, moved: false });
+    }
+    const a = arr[ascIdx];
+    const b = arr[ascNeighbor];
+    const { error: e3 } = await db.from("analysis_records").update({ created_at: b.created_at }).eq("id", a.id);
+    const { error: e4 } = await db.from("analysis_records").update({ created_at: a.created_at }).eq("id", b.id);
+    if (e3 || e4) throw e3 || e4;
+    ok(res, { success: true, moved: true });
+  } catch (e: any) {
+    fail(res, e?.message || "调整失败", 400);
+  }
+});
+
 app.get("/api/v1/people/:id/analyses", requirePin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -486,6 +560,82 @@ app.post("/api/v1/recognize", requirePin, upload.single("image"), async (req, re
   }
 });
 
+// ============ 模拟对话演练 ============
+app.post("/api/v1/rehearse", requirePin, async (req, res) => {
+  try {
+    const schema = z.object({
+      person_id: z.string(),
+      goal: z.string().min(1),
+      mode: z.enum(["chat", "review"]).default("chat"),
+      history: z.array(z.object({ role: z.enum(["user", "ai"]), text: z.string() })).optional(),
+      transcript: z.string().optional(),
+    });
+    const body = schema.parse(req.body);
+    const { data: person, error } = await db.from("people").select("name, background").eq("id", body.person_id).maybeSingle();
+    if (error) throw error;
+    if (!person) return fail(res, "人物不存在", 404, 404);
+    const name = person.name || "对方";
+    const bg = (person.background as string) ? `\n人物背景：${person.background}` : "";
+
+    if (body.mode === "chat") {
+      const history = body.history ?? [];
+      const transcript = history.map((m) => `${m.role === "user" ? "我" : name}：${m.text}`).join("\n");
+      const system = `你正在一场「模拟对话演练」中扮演「${name}」，与用户练习一段真实对话。${bg}
+用户的演练目标：${body.goal}
+扮演要求：完全以 ${name} 的第一人称说话，不出戏、不给建议；语气口语化、贴合真实聊天，每次回复 ≤ 60 字；适度设置障碍（追问、不满、犹豫），用户真诚切中要害时适当缓和。只输出 ${name} 说的话。`;
+      const user = transcript ? `以下是目前为止的对话，请以「${name}」的身份回复最后一句我所说的话：\n${transcript}` : `对话刚开始，请以「${name}」的身份先说一句开场白（针对目标场景）。`;
+      const result = await chat(system, user, 0.9);
+      return ok(res, { reply: result.content.trim() });
+    }
+
+    // review 模式
+    const system = `你是沟通教练。用户刚与「${name}」完成一场模拟对话演练（你扮演了对方）。请复盘用户的表达，严格输出 JSON：
+{"score":0-100,"highlights":["做得好的1-3条"],"risks":["风险/欠佳处1-3条"],"tips":["下次可尝试的具体说法1-3条"]}
+要求：具体、引用原句片段、说人话无套话；score 综合清晰度/语气/目标接近程度。`;
+    const user = `【演练目标】\n${body.goal}\n\n【对话实录】\n${body.transcript ?? ""}`;
+    const result = await chat(system, user, 0.5);
+    const parsed = extractJson(result.content);
+    if (!parsed) return fail(res, "复盘结果无法解析", 500, 500);
+    ok(res, { feedback: parsed });
+  } catch (e: any) {
+    fail(res, e?.message || "演练服务暂不可用", 500, 500);
+  }
+});
+
+// ============ 关系画像 ============
+app.get("/api/v1/people/:id/portrait", requirePin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data: person, error: pe } = await db.from("people").select("name, relationship, background").eq("id", id).maybeSingle();
+    if (pe) throw pe;
+    if (!person) return fail(res, "人物不存在", 404, 404);
+    const { data: recs, error: re } = await db
+      .from("analysis_records")
+      .select("temp_label, result, created_at")
+      .eq("person_id", id)
+      .eq("status", "done")
+      .order("created_at", { ascending: false })
+      .limit(10);
+    if (re) throw re;
+    const digest = (recs ?? [])
+      .map((r: any, i: number) => {
+        const pts = (r.result?.thoughts ?? []).slice(0, 2).map((t: any) => t.point).join("；");
+        return `${i + 1}) [${r.temp_label}] ${pts || "（无要点）"}`;
+      })
+      .join("\n");
+    const system = `你是关系洞察分析师。基于某位用户与「${person.name}」的历次沟通分析记录，输出一张「关系画像」。严格输出 JSON：
+{"style":"TA 的沟通风格（40字内）","landmines":["TA 的雷区/忌讳，1-3条"],"likes":["TA 吃哪套/在意什么，1-3条"],"pattern":"你们关系的整体模式（60字内）","advice":["给用户的具体建议，1-3条"]}
+要求：全部基于给定记录提炼，不编造；说人话，每条 ≤ 40 字。`;
+    const user = `【人物档案】\n关系：${person.relationship || "未知"}；背景：${person.background || "（无）"}\n\n【最近分析记录（新→旧）】\n${digest || "（暂无记录）"}`;
+    const result = await chat(system, user, 0.5);
+    const parsed = extractJson(result.content);
+    if (!parsed) return fail(res, "画像生成失败，请稍后再试", 500, 500);
+    ok(res, parsed);
+  } catch (e: any) {
+    fail(res, e?.message || "画像生成失败", 500, 500);
+  }
+});
+
 // ============ 周报 ============
 app.get("/api/v1/reports", requirePin, async (req, res) => {
   try {
@@ -513,7 +663,7 @@ app.post("/api/v1/reports/generate", requirePin, async (req, res) => {
 
     // 人物统计
     const { data: people } = await db.from("people").select("id, name");
-    const personMap = new Map((people ?? []).map((p: any) => [p.id, p.name]));
+    const personMap = new Map<string, string>((people ?? []).map((p: any) => [String(p.id), String(p.name)]));
 
     const done = (analyses ?? []).filter((a: any) => a.status === "done" && a.result && a.result.thoughts);
     const personStats = new Map<string, { name: string; tempCount: Record<string, number>; lastTemp: string; lastReason: string; count: number }>();
@@ -612,6 +762,17 @@ app.get("/api/v1/dates/upcoming", requirePin, async (req, res) => {
     fail(res, e?.message || "查询失败", 500, 500);
   }
 });
+
+// 可选：托管 Web 版静态页（设置 WEB_DIST_DIR 后，网页与 API 同源，前端无需另配后端地址）
+const webDistDir = process.env.WEB_DIST_DIR;
+if (webDistDir && fsSync.existsSync(webDistDir)) {
+  app.use(express.static(webDistDir));
+  app.use((req, res, next) => {
+    if (req.method !== "GET" || req.path.startsWith("/api")) return next();
+    res.sendFile(path.join(webDistDir, "index.html"));
+  });
+  console.log(`[web] 托管 Web 静态页: ${webDistDir}`);
+}
 
 app.listen(port, () => {
   loadPinState().catch((e) => console.error("加载 PIN 失败:", e));

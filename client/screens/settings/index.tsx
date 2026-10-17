@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal, TextInput,
+  View, Text, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal, TextInput, Platform,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { useSafeRouter } from '@/hooks/useSafeRouter';
@@ -34,6 +34,49 @@ export default function SettingsScreen() {
   const [keyInput, setKeyInput] = useState('');
   const [keyVisible, setKeyVisible] = useState(false);
   const [keyEditing, setKeyEditing] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  // 导出全部数据：人物 + 各人物分析记录 + 周报（Web 端下载 JSON，原生端走系统分享）
+  const exportData = async () => {
+    setExporting(true);
+    try {
+      const people = (await api.people()) || [];
+      const analyses: any[] = [];
+      for (const p of people) {
+        try {
+          const list = await api.personAnalyses(p.id);
+          for (const a of list || []) analyses.push({ ...a, person_name: p.name });
+        } catch { /* 单人失败不影响整体 */ }
+      }
+      let reports: any[] = [];
+      try { reports = (await api.reports()) || []; } catch { /* ignore */ }
+      const payload = {
+        exported_at: new Date().toISOString(),
+        version: 1,
+        people,
+        analyses,
+        reports,
+      };
+      const json = JSON.stringify(payload, null, 2);
+      const filename = `echo-mentor-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      if (Platform.OS === 'web') {
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+        Alert.alert('已导出', `${filename} 已开始下载（${people.length} 位人物、${analyses.length} 条分析记录）`);
+      } else {
+        Alert.alert('已生成', `共 ${people.length} 位人物、${analyses.length} 条分析记录。原生端导出文件功能即将上线。`);
+      }
+    } catch (e: any) {
+      Alert.alert('导出失败', e?.message);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const load = useCallback(async () => {
     try {
@@ -172,6 +215,20 @@ export default function SettingsScreen() {
             </View>
           )}
         </View>
+
+        {/* 数据备份 */}
+        <Text className="text-[15px] font-semibold text-foreground mt-2 mb-2">数据备份</Text>
+        <TouchableOpacity
+          onPress={exportData}
+          disabled={exporting}
+          className="bg-surface rounded-2xl p-4 mb-3 border border-border flex-row items-center justify-between"
+        >
+          <View className="flex-1 mr-3">
+            <Text className="text-[14px] text-foreground">导出全部数据（JSON）</Text>
+            <Text className="text-[11px] text-muted mt-0.5">人物档案 + 分析记录 + 周报，建议定期备份</Text>
+          </View>
+          {exporting ? <ActivityIndicator size="small" color="#E4572E" /> : <Text className="text-muted">›</Text>}
+        </TouchableOpacity>
 
         {/* 安全（可选锁） */}
         <Text className="text-[15px] font-semibold text-foreground mt-2 mb-2">安全</Text>

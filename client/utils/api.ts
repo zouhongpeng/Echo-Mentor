@@ -2,7 +2,10 @@
  * 后端 API 封装（前端零密钥）
  * 所有请求统一带 x-pin-token header
  */
-const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_BASE_URL || "http://localhost:9091";
+// Web 构建默认走同源相对路径（后端托管静态页时无需配置）；原生端默认本机 9091
+const BASE_URL =
+  process.env.EXPO_PUBLIC_BACKEND_BASE_URL ??
+  (typeof window !== "undefined" ? "" : "http://localhost:9091");
 
 let pinToken: string | null = null;
 
@@ -64,6 +67,11 @@ export const api = {
   markSuggestion: (id: string, index: number, used: boolean) =>
     request<any>("PUT", `/api/v1/analysis/${id}/mark`, { index, used }),
   deleteAnalysis: (id: string) => request<any>("DELETE", `/api/v1/analysis/${id}`),
+  moveAnalysis: (id: string, direction: "up" | "down") =>
+    request<any>("PATCH", `/api/v1/analysis/${id}/move`, { direction }),
+  rehearse: (body: { person_id: string; goal: string; mode: "chat" | "review"; history?: { role: string; text: string }[]; transcript?: string }) =>
+    request<any>("POST", "/api/v1/rehearse", body),
+  portrait: (personId: string) => request<any>("GET", `/api/v1/people/${personId}/portrait`),
   // 直连 DeepSeek 成功后，保存计算结果到后端（时间线/温度），可持久化即存
   saveComputed: (data: any) => request<any>("POST", "/api/v1/analyze/save-computed", data),
 

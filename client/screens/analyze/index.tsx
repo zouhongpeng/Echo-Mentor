@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, TextInput, ScrollView, Alert, ActivityIndicator, Platform, Modal, StyleSheet,
 } from 'react-native';
@@ -10,7 +10,7 @@ import { Screen } from '@/components/Screen';
 import { api } from '@/utils/api';
 import { createFormDataFile } from '@/utils';
 import { findMethodByTitle } from '@/constants/methodologies';
-import { getDsKey, analyzeDirect, saveComputedBestEffort } from '@/utils/deepseek';
+import { getDsKey, analyzeDirect, analyzeDirectStream, progressiveExtract, saveComputedBestEffort } from '@/utils/deepseek';
 
 interface AnalyzeProps {
   person_id: string;
@@ -18,6 +18,7 @@ interface AnalyzeProps {
 }
 
 const TEMP_COLOR: Record<string, string> = { 热: '#E4572E', 温: '#C9A227', 冷: '#7A9BCE' };
+const ANALYZE_STAGES = ['正在阅读聊天记录…', '分析对方心理…', '生成建议回复…', '核对注意事项与温度…'];
 
 /**
  * 核心分析页
@@ -40,6 +41,49 @@ export default function AnalyzeScreen() {
   const [pollTimer, setPollTimer] = useState<any>(null);
   const [marks, setMarks] = useState<Record<string, boolean>>({});
 
+  // 流式输出 + 阶段进度
+  const [streamText, setStreamText] = useState('');
+  const [ghost, setGhost] = useState<{ thoughts: string[]; suggestions: string[] }>({ thoughts: [], suggestions: [] });
+  const [stageIdx, setStageIdx] = useState(0);
+  const [tone, setTone] = useState<'正式' | '日常' | '熟昵'>('日常');
+  useEffect(() => {
+    if (!loading) { setStageIdx(0); return; }
+    const iv = setInterval(() => setStageIdx((i) => Math.min(i + 1, ANALYZE_STAGES.length - 1)), 6000);
+    return () => clearInterval(iv);
+  }, [loading]);
+
+  // 风格学习：收集该人物过往「标记用了」的回复 + 最近的想法
+  const gatherStyleExamples = async (): Promise<string[] | undefined> => {
+    try {
+      if (!personId) return undefined;
+      const list = await api.personAnalyses(personId);
+      const out: string[] = [];
+      for (const r of list || []) {
+        const res = r.result || {};
+        const mk = res.marks || {};
+        (res.suggestions || []).forEach((s: any, i: number) => {
+          if (mk[String(i)] && s?.text) out.push(s.text);
+        });
+      }
+      (list || []).slice(0, 3).forEach((r: any) => { if (r.thought_input) out.push(r.thought_input); });
+      return out.length ? out.slice(0, 8) : undefined;
+    } catch { return undefined; }
+  };
+
+  // 对话输入模式：bubble=逐句标说话人 / paste=整段粘贴
+  const [inputMode, setInputMode] = useState<'bubble' | 'paste'>('bubble');
+  const [msgs, setMsgs] = useState<{ speaker: 'me' | 'them'; text: string }[]>([
+    { speaker: 'them', text: '' },
+    { speaker: 'me', text: '' },
+  ]);
+  const buildMsgText = () =>
+    msgs
+      .filter((m) => m.text.trim())
+      .map((m) => `${m.speaker === 'me' ? '我' : personName}：${m.text.trim()}`)
+      .join('\n');
+  const updateMsg = (i: number, patch: Partial<{ speaker: 'me' | 'them'; text: string }>) =>
+    setMsgs((ms) => ms.map((m, idx) => (idx === i ? { ...m, ...patch } : m)));
+
   // 截图识别
   const [picking, setPicking] = useState(false);
   const [shotStep, setShotStep] = useState<null | 'edit'>(null);
@@ -55,25 +99,34 @@ export default function AnalyzeScreen() {
   // 提交分析
   const submit = async (oChat?: string, oThought?: string) => {
     if (loading) return;
-    const chat = oChat ?? chatInput;
+    const chat = oChat ?? (inputMode === 'bubble' ? buildMsgText() : chatInput);
     const thought = oThought ?? thoughtInput;
-    if (!chat.trim() && !shotMessages.length) { Alert.alert('提示', '请先粘贴聊天记录，或用截图输入'); return; }
-    if (!thought.trim()) { Alert.alert('提示', '请填写「我的想法」——没有你的视角，分析会不全'); return; }
+    if (!chat.trim() && !shotMessages.length) { Alert.alert('提示', '请先输入聊天内容（逐句填写或粘贴，也可用截图识别）'); return; }
     setLoading(true); setResult(null); setModerated(false); setMarks({});
+    setStreamText(''); setGhost({ thoughts: [], suggestions: [] });
     const growth = await api.settings().catch(() => ({ growth_mode: 'canned' }));
-    const gmode = growth?.growth_mode === 'hint' || growth?.growth_mode === 'critique' ? growth.growth_mode : 'canned';
+    const gmode = (growth?.growth_mode === 'hint' || growth?.growth_mode === 'critique' ? growth.growth_mode : 'canned') as 'hint' | 'critique' | 'canned';
+    const styleExamples = await gatherStyleExamples();
 
-    // 「自带钥匙」模式：本机已有 DeepSeek Key → 直连 api.deepseek.com（原生端无跨域限制，不依赖后端）
+    // 「自带钥匙」模式：本机已有 DeepSeek Key → 直连 api.deepseek.com（流式逐字返回）
     const dsKey = await getDsKey();
     if (dsKey) {
-      const dr = await analyzeDirect({
+      const sReq = {
         apiKey: dsKey,
         personName,
         chatRecord: chat,
         myThought: thought,
         myReply: gmode === 'critique' ? thought : undefined,
         growthMode: gmode,
+        tone,
+        styleExamples,
+      };
+      let dr = await analyzeDirectStream(sReq, (full) => {
+        setStreamText(full);
+        setGhost(progressiveExtract(full));
       });
+      // 流式失败（非密钥问题）→ 降级为非流式重试
+      if (!dr.ok && dr.kind !== 'auth') dr = await analyzeDirect(sReq);
       if (!dr.ok) {
         setLoading(false);
         if (dr.kind === 'auth') {
@@ -97,8 +150,9 @@ export default function AnalyzeScreen() {
     }
 
     try {
-      const payload: any = { person_id: personId, chat_input: chat, thought_input: thought };
+      const payload: any = { person_id: personId, chat_input: chat, thought_input: thought, tone };
       if (gmode === 'critique') payload.my_reply = thought;
+      if (styleExamples?.length) payload.style_examples = styleExamples;
       const res = await api.analyze(payload);
       if (res.moderated) {
         setModerated(true);
@@ -190,6 +244,7 @@ export default function AnalyzeScreen() {
 
   const useShot = () => {
     setChatInput(buildShotText());
+    setInputMode('paste');
     setShotStep(null); setShotImage(null); setPicking(false);
   };
 
@@ -217,30 +272,101 @@ export default function AnalyzeScreen() {
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 60 }}>
         {/* 分析入口说明 */}
         <Text className="mt-3 text-[13px] text-muted leading-5">
-          把「对方说的话」和时间「我的想法」都给 AI，它会帮你猜对方怎么想、怎么回，并留意沟通的节奏。
+          一句一句填对话，每句标上是谁说的，AI 就能分清「我说的」和「{personName}说的」；也可以直接粘贴或用截图识别。
         </Text>
 
         {/* 双输入 */}
         <View className="mt-5">
           <View className="flex-row items-center justify-between mb-2">
             <Text className="text-[15px] font-semibold text-foreground">聊天记录</Text>
-            <TouchableOpacity onPress={pickImage} className="px-3 h-8 bg-accent-soft rounded-full items-center justify-center">
-              {picking ? <ActivityIndicator size="small" color="#E4572E" /> : <Text className="text-[12px] text-accent font-medium">截图识别</Text>}
-            </TouchableOpacity>
+            <View className="flex-row items-center">
+              <View className="flex-row bg-[#F1F1F1] rounded-full p-0.5 mr-2">
+                <TouchableOpacity
+                  onPress={() => setInputMode('bubble')}
+                  className={`px-3 h-7 rounded-full items-center justify-center ${inputMode === 'bubble' ? 'bg-white shadow-sm' : ''}`}
+                >
+                  <Text className={`text-[12px] ${inputMode === 'bubble' ? 'text-foreground font-semibold' : 'text-muted'}`}>逐句输入</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setInputMode('paste')}
+                  className={`px-3 h-7 rounded-full items-center justify-center ${inputMode === 'paste' ? 'bg-white shadow-sm' : ''}`}
+                >
+                  <Text className={`text-[12px] ${inputMode === 'paste' ? 'text-foreground font-semibold' : 'text-muted'}`}>整段粘贴</Text>
+                </TouchableOpacity>
+              </View>
+              <TouchableOpacity onPress={pickImage} className="px-3 h-8 bg-accent-soft rounded-full items-center justify-center">
+                {picking ? <ActivityIndicator size="small" color="#E4572E" /> : <Text className="text-[12px] text-accent font-medium">截图识别</Text>}
+              </TouchableOpacity>
+            </View>
           </View>
-          <TextInput
-            value={chatInput}
-            onChangeText={setChatInput}
-            placeholder={`例：\n${personName}：昨天加班到很晚，累死了\n我：那你早点休息吧`}
-            placeholderTextColor="#C9C9C9"
-            multiline
-            textAlignVertical="top"
-            className="bg-surface rounded-2xl border border-border px-4 py-3 text-[15px] text-foreground min-h-[150px]"
-          />
+
+          {inputMode === 'paste' ? (
+            <TextInput
+              value={chatInput}
+              onChangeText={setChatInput}
+              placeholder={`例：\n${personName}：昨天加班到很晚，累死了\n我：那你早点休息吧`}
+              placeholderTextColor="#C9C9C9"
+              multiline
+              textAlignVertical="top"
+              className="bg-surface rounded-2xl border border-border px-4 py-3 text-[15px] text-foreground min-h-[150px]"
+            />
+          ) : (
+            <View>
+              {msgs.map((m, i) => {
+                const mine = m.speaker === 'me';
+                return (
+                  <View key={i} className={`flex-row items-start mb-3 ${mine ? 'justify-end' : ''}`}>
+                    {/* 头像：对方靠左，我靠右（微信式） */}
+                    {!mine && <ChatAvatar label={personName.charAt(0) || 'TA'} color="#7A9BCE" />}
+                    <View style={{ maxWidth: '68%', paddingHorizontal: 6 }}>
+                      <TextInput
+                        value={m.text}
+                        onChangeText={(t) => updateMsg(i, { text: t })}
+                        placeholder={mine ? '我说的…' : `${personName}说的…`}
+                        placeholderTextColor="#9CA3AF"
+                        multiline
+                        textAlignVertical="center"
+                        style={{
+                          backgroundColor: mine ? '#95EC69' : '#FFFFFF',
+                          borderColor: mine ? '#86DB5B' : '#E6E6E6',
+                          borderWidth: 1,
+                          borderRadius: 8,
+                          paddingHorizontal: 12,
+                          paddingVertical: 9,
+                          fontSize: 15,
+                          color: '#111111',
+                        }}
+                      />
+                    </View>
+                    {mine && <ChatAvatar label="我" color="#FF7A5C" />}
+                    {/* 切换说话人（点头像）+ 删除 */}
+                    <TouchableOpacity onPress={() => updateMsg(i, { speaker: mine ? 'them' : 'me' })} hitSlop={6} className="ml-1 mt-2">
+                      <Text className="text-[10px] text-muted">换</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => setMsgs((ms) => ms.filter((_, idx) => idx !== i))} hitSlop={6} className="ml-1 mt-2">
+                      <Text className="text-muted text-[12px]">✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+              <View className="flex-row items-center justify-between mt-1">
+                <TouchableOpacity
+                  onPress={() => setMsgs((ms) => [...ms, { speaker: ms[ms.length - 1]?.speaker === 'me' ? 'them' : 'me', text: '' }])}
+                  className="self-start px-3 h-8 rounded-full bg-accent-soft items-center justify-center"
+                >
+                  <Text className="text-[12px] text-accent font-medium">＋ 添加一句</Text>
+                </TouchableOpacity>
+                <Text className="text-[10px] text-muted/70">点头像旁边的「换」可切换谁说的</Text>
+              </View>
+            </View>
+          )}
         </View>
 
         <View className="mt-5">
-          <Text className="text-[15px] font-semibold text-foreground mb-2">我的想法</Text>
+          <View className="flex-row items-center mb-2">
+            <Text className="text-[15px] font-semibold text-foreground">我的想法</Text>
+            <Text className="ml-1.5 text-[12px] text-muted">选填</Text>
+          </View>
           <TextInput
             value={thoughtInput}
             onChangeText={setThoughtInput}
@@ -250,7 +376,26 @@ export default function AnalyzeScreen() {
             textAlignVertical="top"
             className="bg-surface rounded-2xl border border-border px-4 py-3 text-[15px] text-foreground min-h-[90px]"
           />
-          <Text className="mt-1.5 text-[11px] text-muted">我的想法留空时，分析可能不全，建议先填。</Text>
+          <Text className="mt-1.5 text-[11px] text-muted">不填也完全可以分析；写了的话，AI 会结合你的顾虑给出更贴合的建议。</Text>
+        </View>
+
+        {/* 语气选择 */}
+        <View className="mt-5">
+          <View className="flex-row items-center mb-2">
+            <Text className="text-[15px] font-semibold text-foreground">建议的语气</Text>
+            <Text className="ml-1.5 text-[11px] text-muted">AI 会按这个感觉生成建议</Text>
+          </View>
+          <View className="flex-row bg-[#EFEFEF] rounded-full p-0.5">
+            {(['正式', '日常', '熟昵'] as const).map((t) => (
+              <TouchableOpacity
+                key={t}
+                onPress={() => setTone(t)}
+                className={`flex-1 h-9 rounded-full items-center justify-center ${tone === t ? 'bg-white shadow-sm' : ''}`}
+              >
+                <Text className={`text-[13px] ${tone === t ? 'text-foreground font-semibold' : 'text-foreground/55'}`}>{t}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
 
         <TouchableOpacity
@@ -260,6 +405,33 @@ export default function AnalyzeScreen() {
         >
           {loading ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-semibold text-base">帮我分析</Text>}
         </TouchableOpacity>
+
+        {/* 分析进度：阶段清单 + 流式实时预览 */}
+        {loading && (
+          <View className="mt-4 rounded-2xl border border-border bg-white px-4 py-3">
+            {ANALYZE_STAGES.map((s, i) => (
+              <View key={i} className="flex-row items-center mb-1">
+                <Text className={`text-[12px] ${i < stageIdx ? 'text-muted' : i === stageIdx ? 'text-accent font-semibold' : 'text-muted/45'}`}>
+                  {i < stageIdx ? '✓ ' : i === stageIdx ? '◐ ' : '○ '}{s}
+                </Text>
+              </View>
+            ))}
+            {!!streamText && (
+              <View className="mt-2 rounded-xl bg-[#F6F6F8] px-3 py-2">
+                <Text className="text-[11px] font-semibold text-foreground/60 mb-1">实时预览</Text>
+                <ScrollView style={{ maxHeight: 130 }}>
+                  {ghost.thoughts.map((t, i) => (
+                    <Text key={`t${i}`} className="text-[12px] text-foreground/80 leading-4 mb-1">💡 {t}</Text>
+                  ))}
+                  {ghost.suggestions.map((s, i) => (
+                    <Text key={`s${i}`} className="text-[12px] leading-4 mb-1" style={{ color: '#3E8E41' }}>→ {s}</Text>
+                  ))}
+                </ScrollView>
+                <Text className="text-[10px] text-muted/60 mt-1">已生成 {streamText.length} 字…</Text>
+              </View>
+            )}
+          </View>
+        )}
 
         {/* 冷静一下（节制提示） */}
         <TouchableOpacity
@@ -326,6 +498,15 @@ export default function AnalyzeScreen() {
   );
 }
 
+/** 微信式圆形头像 */
+function ChatAvatar({ label, color }: { label: string; color: string }) {
+  return (
+    <View style={{ width: 38, height: 38, borderRadius: 6, backgroundColor: color, alignItems: 'center', justifyContent: 'center' }}>
+      <Text className="text-white font-semibold text-[15px]">{label}</Text>
+    </View>
+  );
+}
+
 /** 三段结果渲染 */
 function ResultView({ result, marks, onCopy, onMark }: any) {
   const [copiedNote, setCopiedNote] = useState<string | null>(null);
@@ -334,100 +515,109 @@ function ResultView({ result, marks, onCopy, onMark }: any) {
   const handleCopy = (t: string, key: string) => { onCopy(t); setCopiedNote(key); setTimeout(() => setCopiedNote(null), 1500); };
 
   return (
-    <View className="mt-8">
-      {/* 场景识别标签 */}
-      {!!result.scene && (
-        <View className="mb-3 flex-row items-center rounded-full border border-border px-4 py-2 self-start" style={{ backgroundColor: 'rgba(255,253,251,0.92)' }}>
-          <Text className="text-[13px] text-foreground">识别场景：</Text>
-          <Text className="text-[13px] font-semibold text-accent">{result.scene}</Text>
+    <View className="mt-8 rounded-3xl border border-border overflow-hidden" style={{ backgroundColor: '#ECECEC' }}>
+      {/* 微信式：顶部居中「时间戳」位放场景与温度 */}
+      <View className="items-center pt-4 pb-1">
+        {!!result.scene && (
+          <View className="px-3 py-1 rounded-full" style={{ backgroundColor: 'rgba(0,0,0,0.05)' }}>
+            <Text className="text-[11px] text-[#7C7C7C]">场景 · {result.scene}</Text>
+          </View>
+        )}
+        <View className="mt-1.5 px-3 py-1 rounded-full" style={{ backgroundColor: 'rgba(0,0,0,0.05)' }}>
+          <Text className="text-[11px] text-[#7C7C7C]">
+            关系温度 · <Text className="font-semibold" style={{ color: TEMP_COLOR[temp.label] || '#666' }}>{temp.label}</Text>
+            {!!temp.reason ? `（${temp.reason}）` : ''}
+          </Text>
         </View>
-      )}
-
-      {/* 关系温度 */}
-      <View className="rounded-2xl border border-border px-5 py-4 flex-row items-center" style={{ backgroundColor: 'rgba(255,253,251,0.92)' }}>
-        <Text className="text-[13px] text-muted">关系温度</Text>
-        <View className="ml-3 flex-row items-center">
-          {['热', '温', '冷'].map((l) => (
-            <View key={l} className="mr-1 flex-row items-center">
-              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: l === temp.label ? TEMP_COLOR[l] : '#E6E6E6' }} />
-            </View>
-          ))}
-        </View>
-        <Text className="ml-3 text-[15px] font-bold" style={{ color: TEMP_COLOR[temp.label] || '#666' }}>{temp.label}</Text>
       </View>
-      {!!temp.reason && <Text className="mt-1.5 text-[12px] text-muted px-1">依据：{temp.reason}</Text>}
 
-      {/* 对面在想什么 */}
-      <Section title="对面在想什么">
+      <View className="px-3.5 pt-2 pb-5">
+        {/* 对面在想什么 → 对方气泡（左侧，带头像） */}
+        <View className="items-center pb-2">
+          <Text className="text-[11px] text-[#9C9C9C]">以下是他心里的想法</Text>
+        </View>
         {(result.thoughts || []).map((t: any, i: number) => (
-          <View key={i} className="rounded-2xl border border-border px-4 py-3 mb-2" style={{ backgroundColor: 'rgba(255,253,251,0.92)' }}>
-            <Text className="text-[15px] text-foreground font-medium">· {t.point}</Text>
-            {!!t.evidence && <Text className="text-[12px] text-muted mt-1 leading-4">{t.evidence}</Text>}
+          <View key={i} className="flex-row items-start mb-2.5">
+            <ChatAvatar label="TA" color="#AAB4C4" />
+            <View style={{ maxWidth: '78%', marginLeft: 8 }}>
+              <View style={{ backgroundColor: '#FFFFFF', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 9, alignSelf: 'flex-start' }}>
+                <Text className="text-[14px] leading-5" style={{ color: '#111111' }}>{t.point}</Text>
+                {!!t.evidence && <Text className="text-[11px] leading-4 mt-1" style={{ color: '#8A8A8A' }}>{t.evidence}</Text>}
+              </View>
+            </View>
           </View>
         ))}
-      </Section>
 
-      {/* 建议回复 — iMessage 质感气泡 */}
-      <Section title="建议回复" hint="点文字即可复制，可标记是否用了">
+        {/* 建议回复 → 我的绿色气泡（右侧，带头像） */}
+        {!!(result.suggestions || []).length && (
+          <View className="items-center pt-3 pb-2">
+            <Text className="text-[11px] text-[#9C9C9C]">你可以这样回（点文字复制）</Text>
+          </View>
+        )}
         {(result.suggestions || []).map((s: any, i: number) => {
           const used = marks[String(i)];
           return (
-            <View key={i} style={{ backgroundColor: 'rgba(255,253,251,0.92)' }} className="rounded-2xl border border-border px-4 py-3 mb-2">
-              <View className="flex-row items-center justify-between mb-1">
-                <Text className="text-[12px] text-accent font-medium">〔{s.style}〕</Text>
-                <View className="flex-row items-center">
-                  <TouchableOpacity onPress={() => onMark(i, !used)} className="px-2">
-                    <Text className="text-[12px] text-muted">{used === undefined ? '标记' : used ? '✓ 用了' : '没用上'}</Text>
+            <View key={i} className="mb-3">
+              <View className="flex-row justify-end items-start">
+                <View style={{ maxWidth: '80%' }}>
+                  <View className="flex-row items-center justify-end mb-1">
+                    <Text className="text-[11px] text-muted mr-2">〔{s.style}〕</Text>
+                    <TouchableOpacity onPress={() => onMark(i, !used)} className="px-1.5">
+                      <Text className="text-[11px] text-muted">{used === undefined ? '标记' : used ? '✓ 用了' : '没用上'}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => handleCopy(s.text, `s${i}`)} hitSlop={8} className="px-1.5">
+                      <Text className="text-[11px] text-accent">{copiedNote === `s${i}` ? '已复制' : '复制'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <TouchableOpacity onPress={() => handleCopy(s.text, `s${i}`)}>
+                    <View style={{ backgroundColor: '#95EC69', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 9, alignSelf: 'flex-end' }}>
+                      <Text className="text-[15px] leading-6" style={{ color: '#111111' }}>{s.text}</Text>
+                    </View>
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={() => handleCopy(s.text, `s${i}`)} hitSlop={8} className="px-2">
-                    <Text className="text-[12px] text-accent">{copiedNote === `s${i}` ? '已复制' : '复制'}</Text>
-                  </TouchableOpacity>
+                  {!!s.reason && <Text className="text-[11px] text-muted mt-1 text-right">理由：{s.reason}</Text>}
+                  {!!s.theory_tag && (
+                    <View className="mt-1.5 items-end">
+                      <TouchableOpacity
+                        onPress={() => setOpenTheory(openTheory === `s${i}` ? null : `s${i}`)}
+                        className="flex-row items-center rounded-full bg-white/80 px-3 py-1 border border-border"
+                        hitSlop={6}
+                      >
+                        <Text className="text-[11px] font-medium text-accent">依据：{s.theory_tag}</Text>
+                        <Text className="ml-1 text-[9px] text-accent/70">{openTheory === `s${i}` ? '▲' : '▼'}</Text>
+                      </TouchableOpacity>
+                      {openTheory === `s${i}` && (() => {
+                        const card = findMethodByTitle(s.theory_tag);
+                        if (!card) return null;
+                        return (
+                          <View className="mt-2 rounded-xl border border-border bg-white px-3.5 py-3">
+                            <Text className="text-[12px] font-semibold text-foreground">《{card.title}》 · {card.source}</Text>
+                            <Text className="mt-1 text-[12px] leading-5 text-foreground/75">{card.summary}</Text>
+                            {card.core[0] && <Text className="mt-1 text-[12px] leading-5 text-foreground/70">· {card.core[0]}</Text>}
+                            {card.usage && <Text className="mt-1 text-[12px] leading-5 text-muted">使用要点：{card.usage}</Text>}
+                            {card.forbid && <Text className="mt-1 text-[12px] leading-5 text-muted">禁用提醒：{card.forbid}</Text>}
+                          </View>
+                        );
+                      })()}
+                    </View>
+                  )}
+                </View>
+                <View className="ml-2">
+                  <ChatAvatar label="我" color="#FF7A5C" />
                 </View>
               </View>
-              <TouchableOpacity onPress={() => handleCopy(s.text, `s${i}`)}>
-                <Text className="text-[15px] text-foreground leading-6">{s.text}</Text>
-                {!!s.reason && <Text className="text-[12px] text-muted mt-1">理由：{s.reason}</Text>}
-              </TouchableOpacity>
-              {!!s.theory_tag && (
-                <View className="mt-2">
-                  <TouchableOpacity
-                    onPress={() => setOpenTheory(openTheory === `s${i}` ? null : `s${i}`)}
-                    className="flex-row items-center self-start rounded-full border border-accent/30 bg-accent/10 px-3 py-1"
-                    hitSlop={6}
-                  >
-                    <Text className="text-[12px] font-medium text-accent">依据：{s.theory_tag}</Text>
-                    <Text className="ml-1 text-[10px] text-accent/70">{openTheory === `s${i}` ? '▲' : '▼'}</Text>
-                  </TouchableOpacity>
-                  {openTheory === `s${i}` && (() => {
-                    const card = findMethodByTitle(s.theory_tag);
-                    if (!card) return null;
-                    return (
-                      <View className="mt-2 rounded-xl border border-border bg-background/60 px-3.5 py-3">
-                        <Text className="text-[12px] font-semibold text-foreground">《{card.title}》 · {card.source}</Text>
-                        <Text className="mt-1 text-[12px] leading-5 text-foreground/75">{card.summary}</Text>
-                        {card.core[0] && <Text className="mt-1 text-[12px] leading-5 text-foreground/70">· {card.core[0]}</Text>}
-                        {card.usage && <Text className="mt-1 text-[12px] leading-5 text-muted">使用要点：{card.usage}</Text>}
-                        {card.forbid && <Text className="mt-1 text-[12px] leading-5 text-muted">禁用提醒：{card.forbid}</Text>}
-                      </View>
-                    );
-                  })()}
-                </View>
-              )}
             </View>
           );
         })}
-      </Section>
 
-      {/* 注意事项 */}
-      {(result.notes || []).length > 0 && (
-        <Section title="注意事项">
-          {(result.notes || []).map((nt: string, i: number) => (
-            <View key={i} className="rounded-2xl border border-border px-4 py-3 mb-2" style={{ backgroundColor: 'rgba(255,253,251,0.92)' }}>
-              <Text className="text-[14px] text-foreground leading-5">· {nt}</Text>
-            </View>
-          ))}
-        </Section>
-      )}
+        {/* 注意事项 → 微信系统提示样式（居中灰字） */}
+        {(result.notes || []).length > 0 && (
+          <View className="items-center pt-2">
+            {(result.notes || []).map((nt: string, i: number) => (
+              <Text key={i} className="text-[11px] text-[#9C9C9C] text-center leading-4 px-6 mb-1">{nt}</Text>
+            ))}
+          </View>
+        )}
+      </View>
     </View>
   );
 }

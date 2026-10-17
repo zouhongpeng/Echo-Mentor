@@ -62,9 +62,9 @@ export default function ReportScreen() {
         <TouchableOpacity
           onPress={handleGenerate}
           disabled={generating}
-          className="bg-gray-900 dark:bg-white rounded-2xl py-4 items-center mb-6 active:opacity-80"
+          className="bg-accent rounded-2xl py-4 items-center mb-6 active:opacity-80"
         >
-          {generating ? <ActivityIndicator color="#fff" /> : <Text className="text-white dark:text-gray-900 font-semibold text-[15px]">生成 / 刷新本周周报</Text>}
+          {generating ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-semibold text-[15px]">生成 / 刷新本周周报</Text>}
         </TouchableOpacity>
 
         {loading && <ActivityIndicator className="mt-4" />}

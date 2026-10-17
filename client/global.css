@@ -24,9 +24,9 @@
 @layer theme {
   :root {
     @variant light {
-      /* Base Colors — 温柔的数据：低饱和暖色系（米白底） */
-      --background: #faf9f7;
-      --foreground: #3f3a36;
+    /* Base Colors — Apple 系统灰底（systemGroupedBackground），卡片纯白浮层 */
+    --background: #f2f2f7;
+    --foreground: #3f3a36;
 
       /* Surface: Used for non-overlay components (cards, accordions, disclosure groups) */
       --surface: #fffdfb;
