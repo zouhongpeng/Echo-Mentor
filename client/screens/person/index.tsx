@@ -9,6 +9,7 @@ import dayjs from 'dayjs';
 import Svg, { Path, Defs, LinearGradient as SvgLinearGradient, Stop, Circle, Line, G, Text as SvgText } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '@/contexts/ThemeContext';
+import SwipeRow from '@/components/SwipeRow';
 
 const AVATAR_COLORS = ['#FF7A5C', '#7A9BCE', '#C9A227', '#6FB98F', '#C084FC', '#E4572E', '#5AA9E6'];
 
@@ -429,6 +430,9 @@ export default function PersonDetailScreen() {
               <Text className="text-[13px] text-muted">还没有分析记录</Text>
             ) : (
               analyses.map((a, idx) => (
+                <SwipeRow key={`row-${a.id}`} onDelete={() => {
+                  try { api.deleteAnalysis(a.id); load(); } catch (e: any) { Alert.alert('删除失败', e?.message); }
+                }}>
                 <TimelineCard
                   key={a.id}
                   record={a}
@@ -445,6 +449,7 @@ export default function PersonDetailScreen() {
                   }}
                   onOutcome={() => setOutcomeFor(a)}
                 />
+                </SwipeRow>
               ))
             )}
           </View>
