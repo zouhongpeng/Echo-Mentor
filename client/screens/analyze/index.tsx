@@ -4,6 +4,7 @@ import {
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import MeAvatar from '@/components/MeAvatar';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 import { useSafeRouter, useSafeSearchParams } from '@/hooks/useSafeRouter';
@@ -389,7 +390,7 @@ export default function AnalyzeScreen() {
                             }}
                           />
                         </View>
-                        {mine && <ChatAvatar label="我" color="#FF7A5C" />}
+                        {mine && <MeAvatar />}
                         {/* 切换说话人（点头像）+ 删除 */}
                         <TouchableOpacity onPress={() => updateMsg(si, mi, { speaker: mine ? 'them' : 'me' })} hitSlop={6} className="ml-1 mt-2">
                           <Text className="text-[12px] text-muted px-1 py-1">换</Text>
@@ -688,7 +689,7 @@ function ResultView({ result, marks, onCopy, onMark }: any) {
                   )}
                 </View>
                 <View className="ml-2">
-                  <ChatAvatar label="我" color="#FF7A5C" />
+                  <MeAvatar />
                 </View>
               </View>
             </View>
