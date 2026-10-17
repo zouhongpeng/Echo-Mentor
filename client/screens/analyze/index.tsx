@@ -47,6 +47,7 @@ export default function AnalyzeScreen() {
   const [streamText, setStreamText] = useState('');
   const [ghost, setGhost] = useState<{ thoughts: string[]; suggestions: string[] }>({ thoughts: [], suggestions: [] });
   const [stageIdx, setStageIdx] = useState(0);
+  const tones = ['正式', '日常', '熟昵'] as const;
   const [tone, setTone] = useState<'正式' | '日常' | '熟昵'>('日常');
   // 快记预填「我的想法」
   useEffect(() => {
@@ -388,28 +389,28 @@ export default function AnalyzeScreen() {
                         {mine && <ChatAvatar label="我" color="#FF7A5C" />}
                         {/* 切换说话人（点头像）+ 删除 */}
                         <TouchableOpacity onPress={() => updateMsg(si, mi, { speaker: mine ? 'them' : 'me' })} hitSlop={6} className="ml-1 mt-2">
-                          <Text className="text-[10px] text-muted">换</Text>
+                          <Text className="text-[12px] text-muted px-1 py-1">换</Text>
                         </TouchableOpacity>
                         <TouchableOpacity onPress={() => delMsg(si, mi)} hitSlop={6} className="ml-1 mt-2">
-                          <Text className="text-muted text-[12px]">✕</Text>
+                          <Text className="text-muted text-[14px] px-1 py-1">✕</Text>
                         </TouchableOpacity>
                       </View>
                     );
                   })}
                   <TouchableOpacity
                     onPress={() => addMsg(si)}
-                    className="mt-1 mb-2 self-start px-3 h-7 rounded-full bg-accent-soft items-center justify-center"
+                    className="mt-1 mb-2 self-start px-4 h-9 rounded-full bg-accent-soft items-center justify-center"
                   >
-                    <Text className="text-[11px] text-accent font-medium">＋ 本段加一句</Text>
+                    <Text className="text-[12.5px] text-accent font-medium">＋ 本段加一句</Text>
                   </TouchableOpacity>
                 </View>
               ))}
               <View className="flex-row items-center justify-between mt-1 flex-wrap gap-2">
                 <TouchableOpacity
                   onPress={addSegment}
-                  className="self-start px-3 h-8 rounded-full bg-accent-soft items-center justify-center"
+                  className="self-start px-4 h-9 rounded-full bg-accent-soft items-center justify-center"
                 >
-                  <Text className="text-[12px] text-accent font-medium">＋ 添加段落（不同时间的聊天）</Text>
+                  <Text className="text-[13px] text-accent font-medium">＋ 添加段落（不同时间的聊天）</Text>
                 </TouchableOpacity>
               </View>
               <Text className="mt-2 text-[10px] text-muted/70">
@@ -438,19 +439,33 @@ export default function AnalyzeScreen() {
 
         {/* 语气选择 */}
         <View className="mt-5">
-          <View className="flex-row items-center mb-2">
+          <View className="flex-row items-center justify-between mb-2">
             <Text className="text-[15px] font-semibold text-foreground">建议的语气</Text>
-            <Text className="ml-1.5 text-[11px] text-muted">AI 会按这个感觉生成建议</Text>
+            <Text className="text-[13px] font-semibold text-accent">{tone}</Text>
           </View>
-          <View className="flex-row bg-on-surface rounded-full p-0.5">
-            {(['正式', '日常', '熟昵'] as const).map((t) => (
-              <TouchableOpacity
+          {/* 吸附滑杆：松手吸附到三档 */}
+          <View
+            className="relative h-11 justify-center"
+            onTouchEnd={(e) => {
+              const { locationX } = e.nativeEvent;
+              const idx = locationX < 60 ? 0 : locationX < 120 ? 1 : 2;
+              setTone(tones[idx]);
+            }}
+          >
+            <View className="absolute left-1 right-1 h-2 rounded-full bg-on-surface" />
+            <View className="absolute left-1 h-2 rounded-full bg-accent" style={{ width: `${(tones.indexOf(tone) / 2) * 96}%` }} />
+            {tones.map((t, i) => (
+              <View
                 key={t}
-                onPress={() => setTone(t)}
-                className={`flex-1 h-9 rounded-full items-center justify-center ${tone === t ? 'bg-white shadow-sm' : ''}`}
+                pointerEvents="none"
+                className="absolute items-center justify-center"
+                style={{ left: `${i * 48}%`, marginLeft: i === 2 ? -24 : i === 1 ? -12 : 0, width: 48 }}
               >
-                <Text className={`text-[13px] ${tone === t ? 'text-foreground font-semibold' : 'text-foreground/55'}`}>{t}</Text>
-              </TouchableOpacity>
+                <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: tone === t ? '#E4572E' : '#C7C7CC', alignItems: 'center', justifyContent: 'center' }}>
+                  {tone === t && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#fff' }} />}
+                </View>
+                <Text className={`text-[12px] mt-1 ${tone === t ? 'text-foreground font-semibold' : 'text-muted'}`}>{t}</Text>
+              </View>
             ))}
           </View>
         </View>
@@ -623,10 +638,10 @@ function ResultView({ result, marks, onCopy, onMark }: any) {
                   <View className="flex-row items-center justify-end mb-1">
                     <Text className="text-[11px] text-muted mr-2">〔{s.style}〕</Text>
                     <TouchableOpacity onPress={() => onMark(i, !used)} className="px-1.5">
-                      <Text className="text-[11px] text-muted">{used === undefined ? '标记' : used ? '✓ 用了' : '没用上'}</Text>
+                      <Text className="text-[12px] text-muted px-1">{used === undefined ? '标记' : used ? '✓ 用了' : '没用上'}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity onPress={() => handleCopy(s.text, `s${i}`)} hitSlop={8} className="px-1.5">
-                      <Text className="text-[11px] text-accent">{copiedNote === `s${i}` ? '已复制' : '复制'}</Text>
+                      <Text className="text-[12px] text-accent px-1">{copiedNote === `s${i}` ? '已复制' : '复制'}</Text>
                     </TouchableOpacity>
                   </View>
                   <TouchableOpacity onPress={() => handleCopy(s.text, `s${i}`)}>

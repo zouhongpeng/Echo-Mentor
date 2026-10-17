@@ -58,6 +58,36 @@ export default function ReportScreen() {
     }
   };
 
+  const esc = (t: string) => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const exportPdf = () => {
+    const latest = list[0];
+    if (!latest) { Alert.alert('提示', '先生成一份周报'); return; }
+    const c = latest.content || {};
+    const ul = (arr?: string[]) => `<ul>${(arr || []).map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`;
+    const html = `<html><head><meta charset="utf-8"><title>沟通周报</title><style>
+      body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;padding:44px;color:#1d1d1f;max-width:640px;margin:0 auto}
+      h1{font-size:22px;margin-bottom:4px} h2{font-size:15px;border-left:4px solid #E4572E;padding-left:9px;margin:22px 0 8px}
+      li{margin:6px 0;line-height:1.65;font-size:14px} p{font-size:14px;line-height:1.7}
+      .meta{color:#86868b;font-size:12px} .card{background:#f5f5f7;border-radius:12px;padding:14px 18px}
+    </style></head><body>
+      <h1>沟通周报 · ${esc(fmt(latest.created_at))}</h1>
+      <p class="meta">由 Echo Mentor 生成</p>
+      <h2>本周概况</h2><div class="card"><p>${esc(c.summary || '')}</p></div>
+      ${c.key_events?.length ? `<h2>本周关键事件</h2>${ul(c.key_events)}` : ''}
+      <h2>聊天习惯模式</h2>${ul(c.habits)}
+      <h2>对方回应趋势</h2><p>${esc(c.otherTrend || '')}</p>
+      <h2>改进建议</h2>${ul(c.improvements)}
+      <h2>进步点</h2>${ul(c.progress)}
+    </body></html>`;
+    if (Platform.OS !== 'web') { Alert.alert('提示', 'PDF 导出请在网页版使用'); return; }
+    const w = window.open('', '_blank');
+    if (!w) { Alert.alert('提示', '浏览器拦截了新窗口，请允许弹出窗口后重试'); return; }
+    w.document.write(html);
+    w.document.close();
+    w.focus();
+    setTimeout(() => w.print(), 300);
+  };
+
   const fmt = (iso?: string) => {
     if (!iso) return '';
     const d = new Date(iso);
@@ -72,7 +102,12 @@ export default function ReportScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} />}
       >
         <Text className="text-[28px] font-bold text-gray-900 dark:text-white mb-1">沟通周报</Text>
-        <Text className="text-[13px] text-gray-500 dark:text-gray-400 mb-4">每周日自动汇总，也可随时手动生成</Text>
+        <View className="flex-row items-center justify-between mb-4">
+          <Text className="text-[13px] text-gray-500 dark:text-gray-400 flex-1 mr-3">每周日自动汇总，也可随时手动生成</Text>
+          <TouchableOpacity onPress={exportPdf} className="px-4 h-9 rounded-full bg-surface border border-border items-center justify-center">
+            <Text className="text-[13px] font-medium text-foreground">📄 导出 PDF</Text>
+          </TouchableOpacity>
+        </View>
 
         <TouchableOpacity
           onPress={handleGenerate}

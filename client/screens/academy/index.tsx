@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { View, Text, ScrollView, TouchableOpacity, useWindowDimensions } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
@@ -90,6 +90,7 @@ export default function AcademyScreen() {
   const [favs, setFavs] = useState<string[]>([]);
   const { resolvedTheme } = useTheme();
   const dark = resolvedTheme === "dark";
+  const pagingRef = useRef<ScrollView | null>(null);
 
   useEffect(() => {
     AsyncStorage.getItem("echo_mentor_fav_phrases").then((v) => {
@@ -136,9 +137,9 @@ export default function AcademyScreen() {
                   key={c.id}
                   activeOpacity={0.7}
                   onPress={() => setActive(i)}
-                  className={`rounded-full px-4 py-2 ${i === active ? "bg-accent" : "bg-surface"}`}
+                  className={`rounded-full px-4 h-9 items-center justify-center ${i === active ? "bg-accent" : "bg-surface border border-border"}`}
                 >
-                  <Text className={`text-[12.5px] font-medium ${i === active ? "text-white" : "text-foreground/70"}`}>
+                  <Text className={`text-[13.5px] font-medium ${i === active ? "text-white" : "text-foreground/70"}`}>
                     {c.title}
                   </Text>
                 </TouchableOpacity>

@@ -275,7 +275,12 @@ function buildUserContent(req: DirectAnalysisReq & { styleExamples?: string[] })
   const anonymizedChat = anonymizeLocal(req.chatRecord, req.personName);
   const anonymizedThought = anonymizeLocal(req.myThought, req.personName);
   const replyLine = req.myReply ? `\n（我自己准备的回复）${anonymizeLocal(req.myReply, req.personName)}` : "";
-  const toneLine = req.tone ? `\n\n【本次期望语气】${req.tone}` : "";
+  const toneRule: Record<string, string> = {
+    "正式": "用词规范礼貌、完整句子、少用网络用语与表情符号，像写给老师或长辈",
+    "日常": "自然口语、简洁直接，像朋友间微信聊天",
+    "熟昵": "放松随意、可以有梗有语气词，像关系很铁的好朋友",
+  };
+  const toneLine = req.tone ? `\n\n【本次期望语气：${req.tone}】${toneRule[req.tone] || ""}\n所有建议回复必须严格符合这个语气，否则视为不合格。` : "";
   const styleBlock = req.styleExamples?.length
     ? `\n\n【我的表达风格参考（学习目标）】\n以下是这位用户过往采纳的回复与本人想法，生成建议时请模仿这种用词习惯与语气（更口语、更像他本人写的），但不复制原句：\n${req.styleExamples.map((s) => `- ${s}`).join("\n")}`
     : "";

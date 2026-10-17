@@ -39,6 +39,8 @@ export default function HomeScreen() {
   const [pinned, setPinned] = useState<string[]>([]);
   const [filterRel, setFilterRel] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [reorderMode, setReorderMode] = useState(false);
+  const [orderIds, setOrderIds] = useState<string[]>([]);
 
   const load = useCallback(async (showSpinner = false) => {
     if (!isUnlocked) return;
@@ -57,10 +59,26 @@ export default function HomeScreen() {
   // 置顶列表存本地（不改数据库结构）
   useFocusEffect(useCallback(() => {
     (async () => {
-      try { setPinned(JSON.parse((await AsyncStorage.getItem(PINNED_KEY)) || '[]')); } catch { /* ignore */ }
+      try {
+        setPinned(JSON.parse((await AsyncStorage.getItem(PINNED_KEY)) || '[]'));
+        setOrderIds(JSON.parse((await AsyncStorage.getItem('echo_mentor_order_ids')) || '[]'));
+      } catch { /* ignore */ }
       load();
     })();
   }, [load]));
+
+  const persistOrder = async (ids: string[]) => {
+    setOrderIds(ids);
+    try { await AsyncStorage.setItem('echo_mentor_order_ids', JSON.stringify(ids)); } catch { /* ignore */ }
+  };
+  const moveCard = (id: string, dir: 'up' | 'down') => {
+    const ids = visible.map((p) => p.id);
+    const i = ids.indexOf(id);
+    const j = dir === 'up' ? i - 1 : i + 1;
+    if (j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    persistOrder(ids);
+  };
 
   const togglePin = async (id: string) => {
     const next = pinned.includes(id) ? pinned.filter((x) => x !== id) : [...pinned, id];
@@ -81,6 +99,10 @@ export default function HomeScreen() {
       const pa = pinned.includes(a.id) ? 0 : 1;
       const pb = pinned.includes(b.id) ? 0 : 1;
       if (pa !== pb) return pa - pb;
+      const ia = orderIds.indexOf(a.id), ib = orderIds.indexOf(b.id);
+      if (ia >= 0 && ib >= 0) return ia - ib;
+      if (ia >= 0) return -1;
+      if (ib >= 0) return 1;
       return (b.last_interaction_at || '').localeCompare(a.last_interaction_at || '');
     });
 
@@ -162,9 +184,21 @@ export default function HomeScreen() {
   return (
     <Screen safeAreaEdges={['top', 'left', 'right', 'bottom']}>
       {/* Header：大标题（主操作移至右下角 FAB，遵循 Material 3「一屏一主操作」） */}
-      <View className="px-6 pt-4 pb-2">
-        <Text className="text-3xl font-bold text-foreground tracking-tight">人物</Text>
-        <Text className="mt-1 text-[13px] text-muted">你关心的人，值得想清楚再回应</Text>
+      <View className="px-6 pt-4 pb-2 flex-row items-end justify-between">
+        <View className="flex-1">
+          <Text className="text-3xl font-bold text-foreground tracking-tight">人物</Text>
+          <Text className="mt-1 text-[13px] text-muted">你关心的人，值得想清楚再回应</Text>
+        </View>
+        {people.length > 1 && (
+          <TouchableOpacity
+            onPress={() => setReorderMode((v) => !v)}
+            className={`px-3.5 h-9 rounded-full items-center justify-center ${reorderMode ? 'bg-accent' : 'bg-surface border border-border'}`}
+          >
+            <Text className={`text-[12.5px] font-medium ${reorderMode ? 'text-white' : 'text-foreground/70'}`}>
+              {reorderMode ? '✓ 完成' : '⇅ 排序'}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* 搜索框（iOS 风格灰底圆角） */}
@@ -184,17 +218,17 @@ export default function HomeScreen() {
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 8 }}>
             <TouchableOpacity
               onPress={() => setFilterRel(null)}
-              className={`px-3.5 h-8 rounded-full items-center justify-center ${filterRel === null ? 'bg-foreground' : 'bg-surface border border-border'}`}
+              className={`px-4 h-9 rounded-full items-center justify-center ${filterRel === null ? 'bg-foreground' : 'bg-surface border border-border'}`}
             >
-              <Text className={`text-[12.5px] ${filterRel === null ? 'text-white font-medium' : 'text-foreground/70'}`}>全部</Text>
+              <Text className={`text-[13.5px] ${filterRel === null ? 'text-white font-medium' : 'text-foreground/70'}`}>全部</Text>
             </TouchableOpacity>
             {relationships.map((r) => (
               <TouchableOpacity
                 key={r}
                 onPress={() => setFilterRel(filterRel === r ? null : r)}
-                className={`px-3.5 h-8 rounded-full items-center justify-center ${filterRel === r ? 'bg-accent' : 'bg-surface border border-border'}`}
+                className={`px-4 h-9 rounded-full items-center justify-center ${filterRel === r ? 'bg-accent' : 'bg-surface border border-border'}`}
               >
-                <Text className={`text-[12.5px] ${filterRel === r ? 'text-white font-medium' : 'text-foreground/70'}`}>{r}</Text>
+                <Text className={`text-[13.5px] ${filterRel === r ? 'text-white font-medium' : 'text-foreground/70'}`}>{r}</Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
@@ -269,26 +303,42 @@ export default function HomeScreen() {
               </View>
             </TouchableOpacity>
 
-            {/* 操作区：主 CTA 醒目（去分析），次级操作弱化（置顶/编辑/删除） */}
+            {/* 操作区：主 CTA 醒目（去分析），次级操作弱化（置顶/编辑/删除）；排序模式显示 ↑↓ */}
             <View className="flex-row items-center justify-between mt-3 pt-3" style={{ borderTopWidth: 1, borderTopColor: '#F7F7F7' }}>
-              <View className="flex-row items-center">
-                <TouchableOpacity onPress={() => togglePin(item.id)} hitSlop={8} className="px-2.5 h-8 items-center justify-center">
-                  <Text className="text-[13px]">{pinned.includes(item.id) ? '📌 已置顶' : '📌'}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => openEdit(item)} hitSlop={8} className="px-2.5 h-8 items-center justify-center">
-                  <Text className="text-[12px] text-muted">编辑</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => confirmDelete(item)} hitSlop={8} className="px-2.5 h-8 items-center justify-center">
-                  <Text className="text-[12px] text-danger">删除</Text>
-                </TouchableOpacity>
-              </View>
-              <TouchableOpacity
-                onPress={() => router.push('/analyze', { person_id: item.id, person_name: item.name })}
-                className="bg-accent px-5 h-9 rounded-full flex-row items-center"
-                activeOpacity={0.8}
-              >
-                <Text className="text-white font-semibold text-[13px]">💬 开始分析</Text>
-              </TouchableOpacity>
+              {reorderMode ? (
+                <View className="flex-1 flex-row items-center justify-between">
+                  <Text className="text-[12px] text-muted">拖动排序模式</Text>
+                  <View className="flex-row items-center gap-2">
+                    <TouchableOpacity onPress={() => moveCard(item.id, 'up')} className="px-3 h-9 bg-on-surface rounded-full items-center justify-center">
+                      <Text className="text-[14px] text-foreground">↑</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => moveCard(item.id, 'down')} className="px-3 h-9 bg-on-surface rounded-full items-center justify-center">
+                      <Text className="text-[14px] text-foreground">↓</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <>
+                  <View className="flex-row items-center">
+                    <TouchableOpacity onPress={() => togglePin(item.id)} hitSlop={10} className="px-2.5 h-9 items-center justify-center">
+                      <Text className="text-[13px]">{pinned.includes(item.id) ? '📌 已置顶' : '📌'}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => openEdit(item)} hitSlop={10} className="px-2.5 h-9 items-center justify-center">
+                      <Text className="text-[13px] text-muted">编辑</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => confirmDelete(item)} hitSlop={10} className="px-2.5 h-9 items-center justify-center">
+                      <Text className="text-[13px] text-danger">删除</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => router.push('/analyze', { person_id: item.id, person_name: item.name })}
+                    className="bg-accent px-5 h-10 rounded-full flex-row items-center"
+                    activeOpacity={0.8}
+                  >
+                    <Text className="text-white font-semibold text-[14px]">💬 开始分析</Text>
+                  </TouchableOpacity>
+                </>
+              )}
             </View>
           </View>
         )}

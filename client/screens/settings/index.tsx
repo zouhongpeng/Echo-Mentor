@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal, TextInput, Platform,
+  View, Text, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal, TextInput, Platform, Animated,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { useSafeRouter } from '@/hooks/useSafeRouter';
@@ -40,6 +40,23 @@ export default function SettingsScreen() {
   const [keyEditing, setKeyEditing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const { themeMode, setThemeMode } = useTheme();
+
+  // 开关联动「震动」：选中一项时，其他选项做视觉抖动（不改变状态）
+  const jiggle = React.useRef<Record<string, Animated.Value>>({}).current;
+  const getJiggle = (k: string) => (jiggle[k] = jiggle[k] || new Animated.Value(0));
+  const triggerJiggle = (excludeKeys: string[]) => {
+    Object.keys(jiggle).forEach((k) => {
+      if (excludeKeys.includes(k)) return;
+      Animated.sequence([
+        Animated.timing(getJiggle(k), { toValue: 1, duration: 55, useNativeDriver: true }),
+        Animated.timing(getJiggle(k), { toValue: -1, duration: 55, useNativeDriver: true }),
+        Animated.timing(getJiggle(k), { toValue: 0.6, duration: 45, useNativeDriver: true }),
+        Animated.timing(getJiggle(k), { toValue: 0, duration: 45, useNativeDriver: true }),
+      ]).start();
+    });
+  };
+  React.useEffect(() => { triggerJiggle(['__init__']); }, []);
+  React.useEffect(() => { triggerJiggle([growthMode, ...APPEARANCES.filter((m) => m === themeMode)]); }, [growthMode, themeMode]);
 
   // 导出全部数据：人物 + 各人物分析记录 + 周报（Web 端下载 JSON，原生端走系统分享）
   const exportData = async () => {
@@ -139,7 +156,11 @@ export default function SettingsScreen() {
         <Text className="text-[15px] font-semibold text-foreground mb-2">成长模式</Text>
         <Text className="text-[12px] text-muted mb-3">从代写到点评，逐步放手——直到你不再需要它</Text>
         {MODES.map((m) => (
-          <TouchableOpacity key={m.key} onPress={() => changeMode(m.key)} disabled={loading}
+          <Animated.View
+            key={m.key}
+            style={{ transform: [{ rotate: getJiggle(`mode:${m.key}`).interpolate({ inputRange: [-1, 1], outputRange: ['-1.5deg', '1.5deg'] }) }] }}
+          >
+          <TouchableOpacity onPress={() => { changeMode(m.key); triggerJiggle([`mode:${m.key}`]); }} disabled={loading}
             className={`rounded-3xl p-4 mb-3 border ${growthMode === m.key ? 'border-accent' : 'border-border'} bg-surface`}>
             <View className="flex-row items-center justify-between">
               <Text className="text-[15px] font-semibold text-foreground">{m.title}</Text>
@@ -149,6 +170,7 @@ export default function SettingsScreen() {
             </View>
             <Text className="text-[13px] text-muted mt-1">{m.desc}</Text>
           </TouchableOpacity>
+          </Animated.View>
         ))}
 
         {/* 节制提醒 */}
@@ -227,15 +249,20 @@ export default function SettingsScreen() {
           <Text className="text-[12px] text-muted mb-3">深色模式会让你晚上用起来更舒服</Text>
           <View className="flex-row bg-on-surface rounded-full p-0.5">
             {APPEARANCES.map((m) => (
-              <TouchableOpacity
+              <Animated.View
                 key={m}
-                onPress={() => setThemeMode(m)}
-                className={`flex-1 h-9 rounded-full items-center justify-center ${themeMode === m ? 'bg-accent' : ''}`}
+                className="flex-1"
+                style={{ transform: [{ translateX: getJiggle(`app:${m}`).interpolate({ inputRange: [-1, 1], outputRange: [-3, 3] }) }] }}
               >
-                <Text className={`text-[13px] ${themeMode === m ? 'text-white font-semibold' : 'text-foreground/60'}`}>
+              <TouchableOpacity
+                onPress={() => { setThemeMode(m); triggerJiggle([`app:${m}`]); }}
+                className={`h-10 rounded-full items-center justify-center ${themeMode === m ? 'bg-accent' : ''}`}
+              >
+                <Text className={`text-[13.5px] ${themeMode === m ? 'text-white font-semibold' : 'text-foreground/60'}`}>
                   {APPEARANCE_LABEL[m]}
                 </Text>
               </TouchableOpacity>
+              </Animated.View>
             ))}
           </View>
         </View>

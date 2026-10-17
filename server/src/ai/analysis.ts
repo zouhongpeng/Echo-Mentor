@@ -117,7 +117,7 @@ export async function runAnalysis(input: AnalysisInput): Promise<AnalysisOutcome
     "",
     "【我（用户）的想法】",
     input.myThought || "（空）",
-    ...(input.tone ? ["", `【本次期望语气】${input.tone}`] : []),
+    ...(input.tone ? ["", `【本次期望语气：${input.tone}】所有建议回复必须严格符合这个语气。正式=规范礼貌少网络用语；日常=自然口语简洁直接；熟昵=放松随意有梗有语气词。不符合视为不合格。`] : []),
     ...(input.styleExamples
       ? [
           "",

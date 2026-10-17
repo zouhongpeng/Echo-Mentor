@@ -783,13 +783,13 @@ function TimelineCard({ record, personaName, first, last, expanded, onToggle, on
                 </Text>
                 <View className="flex-row items-center">
                   <TouchableOpacity onPress={() => onMove('up')} disabled={first} hitSlop={6} className="px-2">
-                    <Text className={`text-[12px] ${first ? 'text-muted/40' : 'text-muted'}`}>↑ 上移</Text>
+                    <Text className={`text-[13px] px-1.5 py-1 ${first ? 'text-muted/40' : 'text-muted'}`}>↑ 上移</Text>
                   </TouchableOpacity>
                   <TouchableOpacity onPress={() => onMove('down')} disabled={last} hitSlop={6} className="px-2">
-                    <Text className={`text-[12px] ${last ? 'text-muted/40' : 'text-muted'}`}>↓ 下移</Text>
+                    <Text className={`text-[13px] px-1.5 py-1 ${last ? 'text-muted/40' : 'text-muted'}`}>↓ 下移</Text>
                   </TouchableOpacity>
                   <TouchableOpacity onPress={onDelete} hitSlop={8} className="px-2">
-                    <Text className="text-[12px] text-danger">删除</Text>
+                    <Text className="text-[13px] text-danger px-1.5 py-1">删除</Text>
                   </TouchableOpacity>
                 </View>
               </View>
