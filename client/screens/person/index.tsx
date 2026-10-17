@@ -8,6 +8,7 @@ import { getDsKey, chatDirect } from '@/utils/deepseek';
 import dayjs from 'dayjs';
 import Svg, { Path, Defs, LinearGradient as SvgLinearGradient, Stop, Circle, Line, G, Text as SvgText } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useTheme } from '@/contexts/ThemeContext';
 
 const AVATAR_COLORS = ['#FF7A5C', '#7A9BCE', '#C9A227', '#6FB98F', '#C084FC', '#E4572E', '#5AA9E6'];
 
@@ -38,6 +39,8 @@ export default function PersonDetailScreen() {
   const params = useSafeSearchParams<PersonDetailProps>();
   const router = useSafeRouter();
   const id = params.id;
+  const { resolvedTheme } = useTheme();
+  const dark = resolvedTheme === 'dark';
 
   const [person, setPerson] = useState<any>(null);
   const [analyses, setAnalyses] = useState<any[]>([]);
@@ -190,7 +193,7 @@ export default function PersonDetailScreen() {
         <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 60 }}>
           {/* 档案头部：渐变卡片 + 称呼大字 + 关系标签 + 温度环 */}
           <LinearGradient
-            colors={['#FFF1EC', '#FDE8E4', '#ECEEF8']}
+            colors={dark ? ['#221E28', '#241F22', '#1B2029'] : ['#FFF1EC', '#FDE8E4', '#ECEEF8']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             className="rounded-[26px] p-5"
