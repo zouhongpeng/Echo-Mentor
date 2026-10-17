@@ -9,6 +9,7 @@ import { Screen } from '@/components/Screen';
 import { api } from '@/utils/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import JellySwitch from '@/components/JellySwitch';
 import { getDsKey, setDsKey } from '@/utils/deepseek';
 
 const APPEARANCES = ["light", "dark", "system"] as const;
@@ -196,21 +197,20 @@ export default function SettingsScreen() {
         <Text className="text-[15px] font-semibold text-foreground mb-2">成长模式</Text>
         <Text className="text-[12px] text-muted mb-3">从代写到点评，逐步放手——直到你不再需要它</Text>
         {MODES.map((m) => (
-          <Animated.View
-            key={m.key}
-            style={{ transform: [{ rotate: getJiggle(`mode:${m.key}`).interpolate({ inputRange: [-1, 1], outputRange: ['-1.5deg', '1.5deg'] }) }] }}
-          >
           <TouchableOpacity onPress={() => { changeMode(m.key); triggerJiggle([`mode:${m.key}`]); }} disabled={loading}
             className={`rounded-3xl p-4 mb-3 border ${growthMode === m.key ? 'border-accent' : 'border-border'} bg-surface`}>
             <View className="flex-row items-center justify-between">
               <Text className="text-[15px] font-semibold text-foreground">{m.title}</Text>
-              <View className={`w-5 h-5 rounded-full border-2 ${growthMode === m.key ? 'bg-accent border-accent' : 'border-muted'}`}>
-                {growthMode === m.key && <View className="flex-1 m-[3px] rounded-full bg-white" />}
-              </View>
+              <Animated.View
+                style={{ transform: [{ rotate: getJiggle(`mode:${m.key}`).interpolate({ inputRange: [-1, 1], outputRange: ['-14deg', '14deg'] }) }] }}
+              >
+                <View className={`w-5 h-5 rounded-full border-2 ${growthMode === m.key ? 'bg-accent border-accent' : 'border-muted'}`}>
+                  {growthMode === m.key && <View className="flex-1 m-[3px] rounded-full bg-white" />}
+                </View>
+              </Animated.View>
             </View>
             <Text className="text-[13px] text-muted mt-1">{m.desc}</Text>
           </TouchableOpacity>
-          </Animated.View>
         ))}
 
         {/* 节制提醒 */}
@@ -220,9 +220,7 @@ export default function SettingsScreen() {
             <Text className="text-[15px] font-semibold text-foreground">节制提醒</Text>
             <Text className="text-[12px] text-muted mt-1">开启后，同一人物 24 小时内第 3 次分析将触发劝停「先去做别的事吧」，帮你克制反复追问</Text>
           </View>
-          <View className={`w-12 h-7 rounded-full justify-center px-1 ${moderation ? 'bg-accent' : 'bg-[#E5E0DA]'}`}>
-            <View className={`w-5 h-5 rounded-full bg-white shadow ${moderation ? 'self-end' : 'self-start'}`} />
-          </View>
+          <JellySwitch value={moderation} onToggle={(v) => toggleModeration(v)} />
         </TouchableOpacity>
 
         {/* AI 接入（自带钥匙） */}
@@ -320,20 +318,22 @@ export default function SettingsScreen() {
           <Text className="text-[12px] text-muted mb-3">深色模式会让你晚上用起来更舒服</Text>
           <View className="flex-row bg-on-surface rounded-full p-0.5">
             {APPEARANCES.map((m) => (
-              <Animated.View
-                key={m}
-                className="flex-1"
-                style={{ transform: [{ translateX: getJiggle(`app:${m}`).interpolate({ inputRange: [-1, 1], outputRange: [-3, 3] }) }] }}
-              >
               <TouchableOpacity
+                key={m}
                 onPress={() => { setThemeMode(m); triggerJiggle([`app:${m}`]); }}
-                className={`h-10 rounded-full items-center justify-center ${themeMode === m ? 'bg-accent' : ''}`}
+                className={`flex-1 h-10 rounded-full items-center justify-center ${themeMode === m ? 'bg-accent' : ''}`}
               >
-                <Text className={`text-[13.5px] ${themeMode === m ? 'text-white font-semibold' : 'text-foreground/60'}`}>
+                <Animated.Text
+                  style={{
+                    fontSize: 13.5,
+                    fontWeight: themeMode === m ? '600' : '400',
+                    color: themeMode === m ? '#fff' : 'rgba(63,58,54,0.6)',
+                    transform: [{ translateX: getJiggle(`app:${m}`).interpolate({ inputRange: [-1, 1], outputRange: [-2.5, 2.5] }) }],
+                  }}
+                >
                   {APPEARANCE_LABEL[m]}
-                </Text>
+                </Animated.Text>
               </TouchableOpacity>
-              </Animated.View>
             ))}
           </View>
         </View>

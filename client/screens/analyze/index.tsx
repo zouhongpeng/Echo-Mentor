@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, TextInput, ScrollView, Alert, ActivityIndicator, Platform, Modal, StyleSheet,
+  View, Text, TouchableOpacity, TextInput, ScrollView, Alert, ActivityIndicator, Platform, Modal, StyleSheet, Animated,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -48,6 +48,7 @@ export default function AnalyzeScreen() {
   const [ghost, setGhost] = useState<{ thoughts: string[]; suggestions: string[] }>({ thoughts: [], suggestions: [] });
   const [stageIdx, setStageIdx] = useState(0);
   const tones = ['正式', '日常', '熟昵'] as const;
+  const [btnState, setBtnState] = useState<'idle' | 'loading' | 'success'>('idle');
   const [tone, setTone] = useState<'正式' | '日常' | '熟昵'>('日常');
   // 快记预填「我的想法」
   useEffect(() => {
@@ -132,7 +133,7 @@ export default function AnalyzeScreen() {
     const chat = oChat ?? (inputMode === 'bubble' ? buildMsgText() : chatInput);
     const thought = oThought ?? thoughtInput;
     if (!chat.trim() && !shotMessages.length) { Alert.alert('提示', '请先输入聊天内容（逐句填写或粘贴，也可用截图识别）'); return; }
-    setLoading(true); setResult(null); setModerated(false); setMarks({});
+    setLoading(true); setBtnState('loading'); setResult(null); setModerated(false); setMarks({});
     setStreamText(''); setGhost({ thoughts: [], suggestions: [] });
     const growth = await api.settings().catch(() => ({ growth_mode: 'canned' }));
     const gmode = (growth?.growth_mode === 'hint' || growth?.growth_mode === 'critique' ? growth.growth_mode : 'canned') as 'hint' | 'critique' | 'canned';
@@ -158,7 +159,7 @@ export default function AnalyzeScreen() {
       // 流式失败（非密钥问题）→ 降级为非流式重试
       if (!dr.ok && dr.kind !== 'auth') dr = await analyzeDirect(sReq);
       if (!dr.ok) {
-        setLoading(false);
+        setBtnState('idle'); setLoading(false);
         if (dr.kind === 'auth') {
           Alert.alert('API Key 无效', '你填写的 DeepSeek API Key 无法使用，请到「设置」页检查/更换。');
         } else {
@@ -167,6 +168,7 @@ export default function AnalyzeScreen() {
         return;
       }
       setResult(dr.json);
+      setBtnState('success'); setTimeout(() => setBtnState('idle'), 1200);
       // 尽力持久化到时间线/温度（后端可达即保存，不可达则仅本次显示）
       const rid = await saveComputedBestEffort({
         person_id: personId,
@@ -199,11 +201,12 @@ export default function AnalyzeScreen() {
             stopPolling();
             setResult(rec.result || {});
             setMarks((rec.result?.marks) || {});
+            setBtnState('success'); setTimeout(() => setBtnState('idle'), 1200);
             setLoading(false);
           } else if (rec.status === 'failed') {
             stopPolling();
             Alert.alert('分析失败', '请稍后再试');
-            setLoading(false);
+            setBtnState('idle'); setLoading(false);
           }
         } catch { /* 轮询期间出错继续 */ }
       };
@@ -211,7 +214,7 @@ export default function AnalyzeScreen() {
       const timer = setInterval(tick, 2000);
       setPollTimer(timer);
     } catch (e: any) {
-      setLoading(false);
+      setBtnState('idle'); setLoading(false);
       const msg = e?.message || '';
       const isNet = /网络|Network|connect|Failed to fetch|fetch/i.test(msg);
       if (isNet) {
@@ -443,40 +446,20 @@ export default function AnalyzeScreen() {
             <Text className="text-[15px] font-semibold text-foreground">建议的语气</Text>
             <Text className="text-[13px] font-semibold text-accent">{tone}</Text>
           </View>
-          {/* 吸附滑杆：松手吸附到三档 */}
-          <View
-            className="relative h-11 justify-center"
-            onTouchEnd={(e) => {
-              const { locationX } = e.nativeEvent;
-              const idx = locationX < 60 ? 0 : locationX < 120 ? 1 : 2;
-              setTone(tones[idx]);
-            }}
-          >
-            <View className="absolute left-1 right-1 h-2 rounded-full bg-on-surface" />
-            <View className="absolute left-1 h-2 rounded-full bg-accent" style={{ width: `${(tones.indexOf(tone) / 2) * 96}%` }} />
-            {tones.map((t, i) => (
-              <View
+          <View className="flex-row bg-on-surface rounded-2xl p-1">
+            {tones.map((t) => (
+              <TouchableOpacity
                 key={t}
-                pointerEvents="none"
-                className="absolute items-center justify-center"
-                style={{ left: `${i * 48}%`, marginLeft: i === 2 ? -24 : i === 1 ? -12 : 0, width: 48 }}
+                onPress={() => setTone(t)}
+                className={`flex-1 h-11 rounded-xl items-center justify-center ${tone === t ? 'bg-surface shadow-sm' : ''}`}
               >
-                <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: tone === t ? '#E4572E' : '#C7C7CC', alignItems: 'center', justifyContent: 'center' }}>
-                  {tone === t && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#fff' }} />}
-                </View>
-                <Text className={`text-[12px] mt-1 ${tone === t ? 'text-foreground font-semibold' : 'text-muted'}`}>{t}</Text>
-              </View>
+                <Text className={`text-[14px] font-semibold ${tone === t ? 'text-accent' : 'text-foreground/55'}`}>{t}</Text>
+              </TouchableOpacity>
             ))}
           </View>
         </View>
 
-        <TouchableOpacity
-          onPress={() => submit()}
-          disabled={loading}
-          className="mt-6 bg-accent rounded-2xl py-4 items-center justify-center shadow-accent"
-        >
-          {loading ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-semibold text-base">帮我分析</Text>}
-        </TouchableOpacity>
+        <AnimatedButton state={btnState} onPress={() => submit()} label="帮我分析" />
 
         {/* 分析进度：阶段清单 + 流式实时预览 */}
         {loading && (
@@ -567,6 +550,34 @@ export default function AnalyzeScreen() {
         </View>
       </Modal>
     </Screen>
+  );
+}
+
+/** 三态分析按钮：点击收缩成圆形出加载圈，完成变绿出对勾 */
+function AnimatedButton({ state, onPress, label }: { state: 'idle' | 'loading' | 'success'; onPress: () => void; label: string }) {
+  const w = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    Animated.timing(w, { toValue: state === 'loading' ? 0 : 1, duration: 240, useNativeDriver: false }).start();
+  }, [state]);
+  const width = w.interpolate({ inputRange: [0, 1], outputRange: [58, 340] });
+  const bg = state === 'success' ? '#34C759' : '#E4572E';
+  return (
+    <Animated.View
+      style={{
+        height: 56, width, backgroundColor: bg, borderRadius: 18,
+        marginTop: 24, alignSelf: 'center', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+      }}
+    >
+      <TouchableOpacity onPress={onPress} disabled={state !== 'idle'} style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
+        {state === 'loading' ? (
+          <ActivityIndicator color="#fff" />
+        ) : state === 'success' ? (
+          <Text style={{ color: '#fff', fontSize: 18, fontWeight: '800' }}>✓</Text>
+        ) : (
+          <Text style={{ color: '#fff', fontWeight: '600', fontSize: 16 }}>{label}</Text>
+        )}
+      </TouchableOpacity>
+    </Animated.View>
   );
 }
 
