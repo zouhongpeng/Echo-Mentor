@@ -11,6 +11,7 @@ import { getSupabaseClient } from "./storage/database/supabase-client";
 import { memoryDb } from "./storage/database/memory-db";
 import { runAnalysis, prepareAnonymized, summerizeRecords, shouldModerate, extractProfileFacts, extractTiming, MODERATION_REPLY, type GrowthMode } from "./ai/analysis";
 import { recognizeImage, chat, extractJson } from "./ai/deepseek";
+import { buildReportDocx, buildAnalysisDocx } from "./docx";
 import { generateWeeklyReport } from "./ai/report";
 import { sha256, anonymize } from "./ai/anonymize";
 
@@ -667,6 +668,42 @@ app.post("/api/v1/import", requirePin, async (req, res) => {
     ok(res, { people: cPeople, dates: cDates, analyses: cAnalyses, reports: cReports });
   } catch (e: any) {
     fail(res, e?.message || "导入失败", 500, 500);
+  }
+});
+
+// ============ Word 导出 ============
+app.get("/api/v1/reports/:id/docx", requirePin, async (req, res) => {
+  try {
+    const { data: r, error } = await db.from("weekly_reports").select("*").eq("id", req.params.id).maybeSingle();
+    if (error) throw error;
+    if (!r) return fail(res, "周报不存在", 404);
+    const buf = await buildReportDocx(r);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent("沟通周报.docx")}`);
+    res.send(Buffer.from(buf));
+  } catch (e: any) {
+    fail(res, e?.message || "导出失败", 500, 500);
+  }
+});
+
+app.get("/api/v1/analysis/:id/docx", requirePin, async (req, res) => {
+  try {
+    const { data: a, error } = await db.from("analysis_records").select("*").eq("id", req.params.id).maybeSingle();
+    if (error) throw error;
+    if (!a) return fail(res, "记录不存在", 404);
+    const { data: p } = await db.from("people").select("name").eq("id", a.person_id).maybeSingle();
+    const buf = await buildAnalysisDocx({
+      personName: p?.name || "对方",
+      created_at: a.created_at,
+      chat_input: a.chat_input,
+      thought_input: a.thought_input,
+      result: a.result || {},
+    });
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(`沟通分析报告.docx`)}`);
+    res.send(Buffer.from(buf));
+  } catch (e: any) {
+    fail(res, e?.message || "导出失败", 500, 500);
   }
 });
 

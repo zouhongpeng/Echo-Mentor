@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, ScrollView, Modal, TextInput, Alert, Acti
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeRouter, useSafeSearchParams } from '@/hooks/useSafeRouter';
 import { Screen } from '@/components/Screen';
-import { api } from '@/utils/api';
+import { api, downloadDocx } from '@/utils/api';
 import { getDsKey, chatDirect } from '@/utils/deepseek';
 import dayjs from 'dayjs';
 import Svg, { Path, Defs, LinearGradient as SvgLinearGradient, Stop, Circle, Line, G, Text as SvgText } from 'react-native-svg';
@@ -768,11 +768,24 @@ function TimelineCard({ record, personaName, first, last, expanded, onToggle, on
                     </View>
                   );
                 }
-                if (usedAny) {
+                if (record.status === 'done') {
                   return (
-                    <TouchableOpacity onPress={onOutcome} className="mt-2 rounded-xl border border-accent/30 bg-accent/10 px-3 py-2">
-                      <Text className="text-[12px] text-accent font-medium">📨 记录对方的回应，评估这条回复的效果</Text>
-                    </TouchableOpacity>
+                    <View className="mt-2 gap-2">
+                      {usedAny && (
+                        <TouchableOpacity onPress={onOutcome} className="rounded-xl border border-accent/30 bg-accent/10 px-3 py-2">
+                          <Text className="text-[12px] text-accent font-medium">📨 记录对方的回应，评估这条回复的效果</Text>
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity
+                        onPress={async () => {
+                          try { await downloadDocx(`/api/v1/analysis/${record.id}/docx`, `沟通分析报告-${dayjs(record.created_at).format('M月D日')}.docx`); Alert.alert('已导出', 'Word 文档已下载'); }
+                          catch (e: any) { Alert.alert('导出失败', e?.message); }
+                        }}
+                        className="rounded-xl border border-border bg-on-surface px-3 py-2"
+                      >
+                        <Text className="text-[12px] text-foreground/80 font-medium">📝 导出 Word 文档</Text>
+                      </TouchableOpacity>
+                    </View>
                   );
                 }
                 return null;

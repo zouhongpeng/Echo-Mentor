@@ -5,6 +5,7 @@ import {
 import { useFocusEffect } from 'expo-router';
 import { Screen } from '@/components/Screen';
 import { api } from '@/utils/api';
+import { downloadDocx } from '@/utils/api';
 
 interface ReportItem {
   id: string;
@@ -104,9 +105,22 @@ export default function ReportScreen() {
         <Text className="text-[28px] font-bold text-gray-900 dark:text-white mb-1">沟通周报</Text>
         <View className="flex-row items-center justify-between mb-4">
           <Text className="text-[13px] text-gray-500 dark:text-gray-400 flex-1 mr-3">每周日自动汇总，也可随时手动生成</Text>
-          <TouchableOpacity onPress={exportPdf} className="px-4 h-9 rounded-full bg-surface border border-border items-center justify-center">
-            <Text className="text-[13px] font-medium text-foreground">📄 导出 PDF</Text>
-          </TouchableOpacity>
+          <View className="flex-row gap-2">
+            <TouchableOpacity onPress={exportPdf} className="px-4 h-9 rounded-full bg-surface border border-border items-center justify-center">
+              <Text className="text-[13px] font-medium text-foreground">📄 导出 PDF</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={async () => {
+                const latest = list[0];
+                if (!latest) { Alert.alert('提示', '先生成一份周报'); return; }
+                try { await downloadDocx(`/api/v1/reports/${latest.id}/docx`, `沟通周报-${fmt(latest.created_at)}.docx`); Alert.alert('已导出', 'Word 文档已下载'); }
+                catch (e: any) { Alert.alert('导出失败', e?.message); }
+              }}
+              className="px-4 h-9 rounded-full bg-accent items-center justify-center"
+            >
+              <Text className="text-[13px] font-semibold text-white">📝 导出 Word</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         <TouchableOpacity

@@ -3,11 +3,30 @@
  * 所有请求统一带 x-pin-token header
  */
 // Web 构建默认走同源相对路径（后端托管静态页时无需配置）；原生端默认本机 9091
+import { Platform } from "react-native";
+
 const BASE_URL =
   process.env.EXPO_PUBLIC_BACKEND_BASE_URL ??
   (typeof window !== "undefined" ? "" : "http://localhost:9091");
 
 let pinToken: string | null = null;
+
+/** 下载 .docx：带 PIN 头取回二进制并触发保存 */
+export async function downloadDocx(path: string, filename: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}${path}`, { headers: pinToken ? { "x-pin-token": pinToken } : {} });
+  if (!res.ok) throw new Error(`导出失败(${res.status})`);
+  const blob = await res.blob();
+  if (Platform.OS === "web") {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  } else {
+    throw new Error("请在网页版使用 Word 导出");
+  }
+}
 
 export function setPinToken(t?: string | null) {
   pinToken = t ?? null;
