@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal, TextInput,
+  View, Text, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal, TextInput, Platform, Animated,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { useSafeRouter } from '@/hooks/useSafeRouter';
@@ -8,7 +8,12 @@ import { Pressable } from 'react-native';
 import { Screen } from '@/components/Screen';
 import { api } from '@/utils/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/contexts/ThemeContext';
+import JellySwitch from '@/components/JellySwitch';
 import { getDsKey, setDsKey } from '@/utils/deepseek';
+
+const APPEARANCES = ["light", "dark", "system"] as const;
+const APPEARANCE_LABEL: Record<string, string> = { light: '浅色', dark: '深色', system: '跟随系统' };
 
 const MODES = [
   { key: 'canned', title: '话术模式', desc: '给完整建议句子（默认）' },
@@ -34,6 +39,107 @@ export default function SettingsScreen() {
   const [keyInput, setKeyInput] = useState('');
   const [keyVisible, setKeyVisible] = useState(false);
   const [keyEditing, setKeyEditing] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [importModal, setImportModal] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [importing, setImporting] = useState(false);
+
+  const doImport = async (raw: string) => {
+    let payload: any;
+    try { payload = JSON.parse(raw); } catch { Alert.alert('失败', '内容不是合法的 JSON，请粘贴导出的备份内容'); return; }
+    if (!payload || (!payload.people?.length && !payload.analyses?.length && !payload.reports?.length)) {
+      Alert.alert('失败', '备份内容为空或格式不对（应包含 people / analyses / reports）');
+      return;
+    }
+    setImporting(true);
+    try {
+      const r = await api.importData(payload);
+      setImportModal(false);
+      setImportText('');
+      Alert.alert('导入完成', `人物 ${r.people} · 日期 ${r.dates} · 分析记录 ${r.analyses} · 周报 ${r.reports}`);
+    } catch (e: any) {
+      Alert.alert('导入失败', e?.message);
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const pickBackupFile = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const fr = new FileReader();
+      fr.onload = () => doImport(String(fr.result));
+      fr.readAsText(file);
+    };
+    input.click();
+  };
+  const { themeMode, setThemeMode } = useTheme();
+
+  // 开关联动「震动」：选中一项时，其他选项做视觉抖动（不改变状态）
+  const jiggle = React.useRef<Record<string, Animated.Value>>({}).current;
+  const getJiggle = (k: string) => (jiggle[k] = jiggle[k] || new Animated.Value(0));
+  const triggerJiggle = (excludeKeys: string[]) => {
+    Object.keys(jiggle).forEach((k) => {
+      if (excludeKeys.includes(k)) return;
+      Animated.sequence([
+        Animated.timing(getJiggle(k), { toValue: 1, duration: 55, useNativeDriver: true }),
+        Animated.timing(getJiggle(k), { toValue: -1, duration: 55, useNativeDriver: true }),
+        Animated.timing(getJiggle(k), { toValue: 0.6, duration: 45, useNativeDriver: true }),
+        Animated.timing(getJiggle(k), { toValue: 0, duration: 45, useNativeDriver: true }),
+      ]).start();
+    });
+  };
+  React.useEffect(() => { triggerJiggle(['__init__']); }, []);
+  React.useEffect(() => { triggerJiggle([growthMode, ...APPEARANCES.filter((m) => m === themeMode)]); }, [growthMode, themeMode]);
+
+  // 导出全部数据：人物 + 各人物分析记录 + 周报（Web 端下载 JSON，原生端走系统分享）
+  const exportData = async () => {
+    setExporting(true);
+    try {
+      const people = (await api.people()) || [];
+      const analyses: any[] = [];
+      const fullPeople: any[] = [];
+      for (const p of people) {
+        try {
+          const full = await api.person(p.id); // 含重要日期
+          fullPeople.push({ ...full });
+          const list = await api.personAnalyses(p.id);
+          for (const a of list || []) analyses.push({ ...a, person_name: p.name });
+        } catch { /* 单人失败不影响整体 */ }
+      }
+      let reports: any[] = [];
+      try { reports = (await api.reports()) || []; } catch { /* ignore */ }
+      const payload = {
+        exported_at: new Date().toISOString(),
+        version: 1,
+        people: fullPeople.length ? fullPeople : people,
+        analyses,
+        reports,
+      };
+      const json = JSON.stringify(payload, null, 2);
+      const filename = `echo-mentor-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      if (Platform.OS === 'web') {
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+        Alert.alert('已导出', `${filename} 已开始下载（${people.length} 位人物、${analyses.length} 条分析记录）`);
+      } else {
+        Alert.alert('已生成', `共 ${people.length} 位人物、${analyses.length} 条分析记录。原生端导出文件功能即将上线。`);
+      }
+    } catch (e: any) {
+      Alert.alert('导出失败', e?.message);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const load = useCallback(async () => {
     try {
@@ -91,13 +197,17 @@ export default function SettingsScreen() {
         <Text className="text-[15px] font-semibold text-foreground mb-2">成长模式</Text>
         <Text className="text-[12px] text-muted mb-3">从代写到点评，逐步放手——直到你不再需要它</Text>
         {MODES.map((m) => (
-          <TouchableOpacity key={m.key} onPress={() => changeMode(m.key)} disabled={loading}
+          <TouchableOpacity onPress={() => { changeMode(m.key); triggerJiggle([`mode:${m.key}`]); }} disabled={loading}
             className={`rounded-3xl p-4 mb-3 border ${growthMode === m.key ? 'border-accent' : 'border-border'} bg-surface`}>
             <View className="flex-row items-center justify-between">
               <Text className="text-[15px] font-semibold text-foreground">{m.title}</Text>
-              <View className={`w-5 h-5 rounded-full border-2 ${growthMode === m.key ? 'bg-accent border-accent' : 'border-muted'}`}>
-                {growthMode === m.key && <View className="flex-1 m-[3px] rounded-full bg-white" />}
-              </View>
+              <Animated.View
+                style={{ transform: [{ rotate: getJiggle(`mode:${m.key}`).interpolate({ inputRange: [-1, 1], outputRange: ['-14deg', '14deg'] }) }] }}
+              >
+                <View className={`w-5 h-5 rounded-full border-2 ${growthMode === m.key ? 'bg-accent border-accent' : 'border-muted'}`}>
+                  {growthMode === m.key && <View className="flex-1 m-[3px] rounded-full bg-white" />}
+                </View>
+              </Animated.View>
             </View>
             <Text className="text-[13px] text-muted mt-1">{m.desc}</Text>
           </TouchableOpacity>
@@ -110,9 +220,7 @@ export default function SettingsScreen() {
             <Text className="text-[15px] font-semibold text-foreground">节制提醒</Text>
             <Text className="text-[12px] text-muted mt-1">开启后，同一人物 24 小时内第 3 次分析将触发劝停「先去做别的事吧」，帮你克制反复追问</Text>
           </View>
-          <View className={`w-12 h-7 rounded-full justify-center px-1 ${moderation ? 'bg-accent' : 'bg-[#E5E0DA]'}`}>
-            <View className={`w-5 h-5 rounded-full bg-white shadow ${moderation ? 'self-end' : 'self-start'}`} />
-          </View>
+          <JellySwitch value={moderation} onToggle={(v) => toggleModeration(v)} />
         </TouchableOpacity>
 
         {/* AI 接入（自带钥匙） */}
@@ -172,6 +280,85 @@ export default function SettingsScreen() {
             </View>
           )}
         </View>
+
+        {/* 导入 Modal */}
+        <Modal visible={importModal} transparent animationType="slide" onRequestClose={() => setImportModal(false)}>
+          <View className="flex-1 bg-black/30 justify-end">
+            <View className="bg-surface rounded-t-3xl p-6 pb-8">
+              <View className="flex-row items-center justify-between mb-4">
+                <Text className="text-xl font-bold text-foreground">导入备份</Text>
+                <TouchableOpacity onPress={() => setImportModal(false)} hitSlop={10}><Text className="text-2xl text-muted">✕</Text></TouchableOpacity>
+              </View>
+              <Text className="text-[12px] text-muted mb-3 leading-5">
+                粘贴之前导出的 JSON 备份内容，或选择备份文件。导入会按记录 ID 合并（已存在则更新），不会删除现有数据。
+              </Text>
+              <View className="flex-row gap-2 mb-3">
+                <TouchableOpacity onPress={pickBackupFile} className="px-4 h-9 rounded-full bg-accent-soft items-center justify-center">
+                  <Text className="text-[13px] text-accent font-medium">选择备份文件</Text>
+                </TouchableOpacity>
+              </View>
+              <TextInput
+                value={importText}
+                onChangeText={setImportText}
+                placeholder='或在此粘贴 JSON，如 {"exported_at":…,"people":[…]}'
+                placeholderTextColor="#9C9CA3"
+                multiline
+                className="bg-on-surface rounded-xl px-4 py-3 text-[12px] text-foreground min-h-[120px] font-mono"
+              />
+              <TouchableOpacity onPress={() => doImport(importText)} disabled={importing || !importText.trim()} className="mt-4 h-12 rounded-xl bg-accent items-center justify-center">
+                {importing ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-semibold">开始导入</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        {/* 外观 */}
+        <Text className="text-[15px] font-semibold text-foreground mt-2 mb-2">外观</Text>
+        <View className="bg-surface rounded-2xl p-4 mb-3 border border-border">
+          <Text className="text-[12px] text-muted mb-3">深色模式会让你晚上用起来更舒服</Text>
+          <View className="flex-row bg-on-surface rounded-full p-0.5">
+            {APPEARANCES.map((m) => (
+              <TouchableOpacity
+                key={m}
+                onPress={() => { setThemeMode(m); triggerJiggle([`app:${m}`]); }}
+                className={`flex-1 h-10 rounded-full items-center justify-center ${themeMode === m ? 'bg-accent' : ''}`}
+              >
+                <Animated.Text
+                  style={{
+                    fontSize: 13.5,
+                    fontWeight: themeMode === m ? '600' : '400',
+                    color: themeMode === m ? '#fff' : 'rgba(63,58,54,0.6)',
+                    transform: [{ translateX: getJiggle(`app:${m}`).interpolate({ inputRange: [-1, 1], outputRange: [-2.5, 2.5] }) }],
+                  }}
+                >
+                  {APPEARANCE_LABEL[m]}
+                </Animated.Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
+        {/* 数据备份 */}
+        <Text className="text-[15px] font-semibold text-foreground mt-2 mb-2">数据备份</Text>
+        <TouchableOpacity
+          onPress={exportData}
+          disabled={exporting}
+          className="bg-surface rounded-2xl p-4 mb-3 border border-border flex-row items-center justify-between"
+        >
+          <View className="flex-1 mr-3">
+            <Text className="text-[14px] text-foreground">导出全部数据（JSON）</Text>
+            <Text className="text-[11px] text-muted mt-0.5">人物档案 + 分析记录 + 周报，建议定期备份</Text>
+          </View>
+          {exporting ? <ActivityIndicator size="small" color="#E4572E" /> : <Text className="text-muted">›</Text>}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={() => (Platform.OS === 'web' ? setImportModal(true) : Alert.alert('提示', '导入请在网页版使用'))}
+          className="bg-surface rounded-2xl p-4 mb-3 border border-border flex-row items-center justify-between"
+        >
+          <Text className="text-[14px] text-foreground">导入备份（粘贴 / 选择文件）</Text>
+          <Text className="text-muted">›</Text>
+        </TouchableOpacity>
 
         {/* 安全（可选锁） */}
         <Text className="text-[15px] font-semibold text-foreground mt-2 mb-2">安全</Text>

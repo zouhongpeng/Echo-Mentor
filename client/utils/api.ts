@@ -2,9 +2,31 @@
  * 后端 API 封装（前端零密钥）
  * 所有请求统一带 x-pin-token header
  */
-const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_BASE_URL || "http://localhost:9091";
+// Web 构建默认走同源相对路径（后端托管静态页时无需配置）；原生端默认本机 9091
+import { Platform } from "react-native";
+
+const BASE_URL =
+  process.env.EXPO_PUBLIC_BACKEND_BASE_URL ??
+  (typeof window !== "undefined" ? "" : "http://localhost:9091");
 
 let pinToken: string | null = null;
+
+/** 下载 .docx：带 PIN 头取回二进制并触发保存 */
+export async function downloadDocx(path: string, filename: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}${path}`, { headers: pinToken ? { "x-pin-token": pinToken } : {} });
+  if (!res.ok) throw new Error(`导出失败(${res.status})`);
+  const blob = await res.blob();
+  if (Platform.OS === "web") {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  } else {
+    throw new Error("请在网页版使用 Word 导出");
+  }
+}
 
 export function setPinToken(t?: string | null) {
   pinToken = t ?? null;
@@ -64,6 +86,14 @@ export const api = {
   markSuggestion: (id: string, index: number, used: boolean) =>
     request<any>("PUT", `/api/v1/analysis/${id}/mark`, { index, used }),
   deleteAnalysis: (id: string) => request<any>("DELETE", `/api/v1/analysis/${id}`),
+  moveAnalysis: (id: string, direction: "up" | "down") =>
+    request<any>("PATCH", `/api/v1/analysis/${id}/move`, { direction }),
+  rehearse: (body: { person_id: string; goal: string; mode: "chat" | "review"; history?: { role: string; text: string }[]; transcript?: string }) =>
+    request<any>("POST", "/api/v1/rehearse", body),
+  portrait: (personId: string) => request<any>("GET", `/api/v1/people/${personId}/portrait`),
+  importData: (payload: unknown) => request<any>("POST", "/api/v1/import", payload),
+  analysisOutcome: (id: string, theirReply: string) =>
+    request<any>("POST", `/api/v1/analysis/${id}/outcome`, { their_reply: theirReply }),
   // 直连 DeepSeek 成功后，保存计算结果到后端（时间线/温度），可持久化即存
   saveComputed: (data: any) => request<any>("POST", "/api/v1/analyze/save-computed", data),
 
