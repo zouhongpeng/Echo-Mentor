@@ -604,6 +604,72 @@ app.post("/api/v1/recognize", requirePin, upload.single("image"), async (req, re
   }
 });
 
+// ============ 备份导入 ============
+app.post("/api/v1/import", requirePin, async (req, res) => {
+  try {
+    const people = Array.isArray(req.body?.people) ? req.body.people : [];
+    const analyses = Array.isArray(req.body?.analyses) ? req.body.analyses : [];
+    const reports = Array.isArray(req.body?.reports) ? req.body.reports : [];
+    let cPeople = 0, cDates = 0, cAnalyses = 0, cReports = 0;
+
+    for (const p of people) {
+      if (!p?.id || !p?.name) continue;
+      const dates = Array.isArray(p.dates) ? p.dates : [];
+      const { data: existing } = await db.from("people").select("id").eq("id", p.id).limit(1);
+      const row = {
+        id: p.id, name: p.name, relationship: p.relationship ?? "",
+        background: p.background ?? "", avatar_color: p.avatar_color ?? "",
+        updated_at: p.updated_at || new Date().toISOString(),
+      };
+      if (existing?.length) {
+        await db.from("people").update(row).eq("id", p.id);
+      } else {
+        await db.from("people").insert(row);
+      }
+      cPeople++;
+      if (dates.length) {
+        await db.from("important_dates").delete().eq("person_id", p.id);
+        for (const d of dates) {
+          if (!d?.name) continue;
+          await db.from("important_dates").insert({ person_id: p.id, name: d.name, month_day: d.month_day || "" });
+          cDates++;
+        }
+      }
+    }
+
+    for (const a of analyses) {
+      if (!a?.id || !a?.person_id) continue;
+      const row = {
+        id: a.id, person_id: a.person_id,
+        chat_input: a.chat_input ?? "", thought_input: a.thought_input ?? "",
+        result: a.result ?? {}, temp_label: a.temp_label ?? "温", temp_reason: a.temp_reason ?? "",
+        status: a.status === "gen" ? "failed" : (a.status || "done"),
+        created_at: a.created_at || new Date().toISOString(),
+      };
+      const { data: existing } = await db.from("analysis_records").select("id").eq("id", a.id).limit(1);
+      if (existing?.length) await db.from("analysis_records").update(row).eq("id", a.id);
+      else await db.from("analysis_records").insert(row);
+      cAnalyses++;
+    }
+
+    for (const r of reports) {
+      if (!r?.id) continue;
+      const row = {
+        id: r.id, week_start: r.week_start || new Date().toISOString(),
+        content: r.content ?? {}, created_at: r.created_at || new Date().toISOString(),
+      };
+      const { data: existing } = await db.from("weekly_reports").select("id").eq("id", r.id).limit(1);
+      if (existing?.length) await db.from("weekly_reports").update(row).eq("id", r.id);
+      else await db.from("weekly_reports").insert(row);
+      cReports++;
+    }
+
+    ok(res, { people: cPeople, dates: cDates, analyses: cAnalyses, reports: cReports });
+  } catch (e: any) {
+    fail(res, e?.message || "导入失败", 500, 500);
+  }
+});
+
 // ============ 模拟对话演练 ============
 app.post("/api/v1/rehearse", requirePin, async (req, res) => {
   try {

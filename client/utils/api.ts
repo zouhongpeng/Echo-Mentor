@@ -72,6 +72,9 @@ export const api = {
   rehearse: (body: { person_id: string; goal: string; mode: "chat" | "review"; history?: { role: string; text: string }[]; transcript?: string }) =>
     request<any>("POST", "/api/v1/rehearse", body),
   portrait: (personId: string) => request<any>("GET", `/api/v1/people/${personId}/portrait`),
+  importData: (payload: unknown) => request<any>("POST", "/api/v1/import", payload),
+  analysisOutcome: (id: string, theirReply: string) =>
+    request<any>("POST", `/api/v1/analysis/${id}/outcome`, { their_reply: theirReply }),
   // 直连 DeepSeek 成功后，保存计算结果到后端（时间线/温度），可持久化即存
   saveComputed: (data: any) => request<any>("POST", "/api/v1/analyze/save-computed", data),
 
