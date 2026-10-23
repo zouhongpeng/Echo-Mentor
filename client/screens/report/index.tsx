@@ -60,7 +60,7 @@ export default function ReportScreen() {
   };
 
   const esc = (t: string) => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const exportPdf = () => {
+  const exportPdf = async () => {
     const latest = list[0];
     if (!latest) { Alert.alert('提示', '先生成一份周报'); return; }
     const c = latest.content || {};
@@ -80,7 +80,17 @@ export default function ReportScreen() {
       <h2>改进建议</h2>${ul(c.improvements)}
       <h2>进步点</h2>${ul(c.progress)}
     </body></html>`;
-    if (Platform.OS !== 'web') { Alert.alert('提示', 'PDF 导出请在网页版使用'); return; }
+    if (Platform.OS !== 'web') {
+      // 原生端：把报告 HTML 存成文件并调系统分享（浏览器/WPS 打开后可另存为 PDF）
+      try {
+        const { shareTextFile } = await import('@/utils/api');
+        await shareTextFile(html, `沟通周报-${new Date().toISOString().slice(0, 10)}.html`);
+        Alert.alert('已生成', '报告文件已通过系统分享发出：用浏览器或 WPS 打开后，选择「打印 → 另存为 PDF」即可得到 PDF。');
+      } catch (e: any) {
+        Alert.alert('导出失败', e?.message);
+      }
+      return;
+    }
     const w = window.open('', '_blank');
     if (!w) { Alert.alert('提示', '浏览器拦截了新窗口，请允许弹出窗口后重试'); return; }
     w.document.write(html);
