@@ -4,6 +4,8 @@
  */
 // Web 构建默认走同源相对路径（后端托管静态页时无需配置）；原生端默认本机 9091
 import { Platform } from "react-native";
+import * as FileSystem from "expo-file-system";
+import * as Sharing from "expo-sharing";
 
 const BASE_URL =
   process.env.EXPO_PUBLIC_BACKEND_BASE_URL ??
@@ -11,21 +13,46 @@ const BASE_URL =
 
 let pinToken: string | null = null;
 
-/** 下载 .docx：带 PIN 头取回二进制并触发保存 */
+/** 按扩展名推断 MIME（分享面板用） */
+function mimeOf(filename: string): string {
+  if (filename.endsWith(".pdf")) return "application/pdf";
+  if (filename.endsWith(".html")) return "text/html";
+  if (filename.endsWith(".json")) return "application/json";
+  if (filename.endsWith(".png")) return "image/png";
+  if (filename.endsWith(".jpg") || filename.endsWith(".jpeg")) return "image/jpeg";
+  return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+}
+
+/** 下载 .docx / .pdf / .json 等：Web 触发浏览器下载；原生端下载到缓存后调系统分享（可存文件、发微信、用 WPS 打开） */
 export async function downloadDocx(path: string, filename: string): Promise<void> {
-  const res = await fetch(`${BASE_URL}${path}`, { headers: pinToken ? { "x-pin-token": pinToken } : {} });
-  if (!res.ok) throw new Error(`导出失败(${res.status})`);
-  const blob = await res.blob();
   if (Platform.OS === "web") {
+    const res = await fetch(`${BASE_URL}${path}`, { headers: pinToken ? { "x-pin-token": pinToken } : {} });
+    if (!res.ok) throw new Error(`导出失败(${res.status})`);
+    const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
-  } else {
-    throw new Error("请在网页版使用 Word 导出");
+    return;
   }
+  // 原生端：带 PIN 头下载到缓存目录 → 系统分享
+  const fileUri = `${FileSystem.cacheDirectory}${filename}`;
+  const dl = await FileSystem.downloadAsync(`${BASE_URL}${path}`, fileUri, {
+    headers: pinToken ? { "x-pin-token": pinToken } : {},
+  });
+  if (dl.status >= 400) throw new Error(`导出失败(${dl.status})`);
+  if (!(await Sharing.isAvailableAsync())) throw new Error("当前设备不支持系统分享，请升级系统后重试");
+  await Sharing.shareAsync(dl.uri, { mimeType: mimeOf(filename), dialogTitle: "保存或分享文件", UTI: "public.data" });
+}
+
+/** 原生端通用：把本地文本内容写成文件并调起系统分享 */
+export async function shareTextFile(content: string, filename: string): Promise<void> {
+  const fileUri = `${FileSystem.cacheDirectory}${filename}`;
+  await FileSystem.writeAsStringAsync(fileUri, content, { encoding: FileSystem.EncodingType.UTF8 });
+  if (!(await Sharing.isAvailableAsync())) throw new Error("当前设备不支持系统分享");
+  await Sharing.shareAsync(fileUri, { mimeType: mimeOf(filename), dialogTitle: "保存或分享文件", UTI: "public.data" });
 }
 
 export function setPinToken(t?: string | null) {
@@ -114,6 +141,21 @@ export const api = {
       if (!r.ok) throw new Error(json.msg || "识别失败");
       return json.data as { messages: { speaker: string; text: string }[] };
     }),
+
+  // ===== AI 智能辅助 =====
+  /** 把整段粘贴的聊天记录交给 AI 分句并标注说话人 */
+  parseChat: (text: string, personName: string) =>
+    request<{ messages: { speaker: string; text: string }[] }>("POST", "/api/v1/parse-chat", {
+      text,
+      person_name: personName,
+    }),
+  /** 从一段聊天里提取人物档案（称呼/关系/背景），用于 AI 快速建档 */
+  extractProfile: (text: string) =>
+    request<{ name?: string; relationship?: string; background?: string }>(
+      "POST",
+      "/api/v1/people/extract-profile",
+      { text },
+    ),
 
   // ===== Reports =====
   reports: () => request<any[]>("GET", "/api/v1/reports"),
