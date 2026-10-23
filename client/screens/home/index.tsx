@@ -36,6 +36,27 @@ export default function HomeScreen() {
   const [editing, setEditing] = useState<Person | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  // AI 快速建档：粘贴一段聊天 → AI 自动填称呼/关系/背景
+  const [aiText, setAiText] = useState('');
+  const [aiFilling, setAiFilling] = useState(false);
+  const aiFill = async () => {
+    if (!aiText.trim() || aiFilling) return;
+    setAiFilling(true);
+    try {
+      const p = await api.extractProfile(aiText);
+      setForm((f) => ({
+        ...f,
+        name: p.name?.trim() ? p.name.trim() : f.name,
+        relationship: p.relationship?.trim() ? p.relationship.trim() : f.relationship,
+        background: p.background?.trim() ? p.background.trim() : f.background,
+      }));
+      Alert.alert('AI 填好了', p.name ? '已经帮你填好，看看对不对，改动后保存即可。' : 'AI 没从这段话里认出称呼，你可以只参考「背景备注」，或直接手动填。');
+    } catch (e: any) {
+      Alert.alert('AI 填充失败', `${e?.message ?? '请稍后重试'}。不影响手动填写。`);
+    } finally {
+      setAiFilling(false);
+    }
+  };
   const [reminders, setReminders] = useState<UpcomingDate[]>([]);
   const [pinned, setPinned] = useState<string[]>([]);
   const [filterRel, setFilterRel] = useState<string | null>(null);
@@ -427,6 +448,32 @@ export default function HomeScreen() {
             </View>
 
             <ScrollView keyboardShouldPersistTaps="handled">
+              {/* AI 快速建档（懒人建法） */}
+              {!editing && (
+                <View className="bg-on-surface rounded-2xl p-4 mb-5">
+                  <Text className="text-[14px] font-semibold text-foreground mb-1">✨ 懒人建法</Text>
+                  <Text className="text-[12px] text-muted mb-2 leading-4">粘贴一段和 TA 的聊天记录，AI 自动帮你填称呼、关系和背景备注。</Text>
+                  <TextInput
+                    value={aiText}
+                    onChangeText={setAiText}
+                    placeholder="粘贴最近的一段聊天…（不想用就直接在下面手动填）"
+                    placeholderTextColor="#C9C9C9"
+                    multiline
+                    className="bg-surface rounded-xl border border-border px-3 py-2.5 text-[14px] text-foreground min-h-[64px] mb-2"
+                  />
+                  <TouchableOpacity
+                    onPress={aiFill}
+                    disabled={aiFilling || !aiText.trim()}
+                    className="h-9 rounded-full bg-accent items-center justify-center self-start px-4"
+                  >
+                    {aiFilling ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text className="text-white text-[13px] font-semibold">AI 帮我填档案</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              )}
               <Text className="text-[13px] text-muted mb-1.5">怎么称呼这个人？<Text className="text-danger">*</Text></Text>
               <TextInput
                 value={form.name}
