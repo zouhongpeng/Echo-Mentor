@@ -1,8 +1,8 @@
 /**
  * DeepSeek 大模型接入服务（OpenAI 兼容接口）
  * - 文本分析：model=deepseek-chat
- * - 截图识别：model=deepseek-chat + 视觉输入（multimodal），失败时由调用方降级手动粘贴
- * 仅后端使用，读取 DEEPSEEK_API_KEY，前端零密钥。
+ * - 截图识别：走独立视觉模型通道（见 recognizeImage 说明），失败时由调用方降级手动粘贴
+ * 仅后端使用，读取 DEEPSEEK_API_KEY / VISION_API_KEY，前端零密钥。
  */
 import crypto from "crypto";
 
@@ -89,22 +89,62 @@ export async function chat(
   );
 }
 
-/** 视觉识别（截图转文字并分离说话人）；调用方需自行捕获异常做降级 */
+/**
+ * 视觉识别（截图转文字并分离说话人）；调用方需自行捕获异常做降级。
+ *
+ * ⚠️ DeepSeek 的 deepseek-chat 是纯文本模型，不支持图片输入（传 image_url 必报 400），
+ * 因此截图识别走独立的"视觉模型"通道：
+ * - VISION_API_KEY   ：视觉服务商密钥（推荐硅基流动 siliconflow.cn，可免费申请，国内直连）
+ * - VISION_BASE_URL  ：默认 https://api.siliconflow.cn/v1/chat/completions
+ * - VISION_MODEL     ：默认 Qwen/Qwen2.5-VL-32B-Instruct（免费额度可用）
+ */
+const VISION_BASE_URL =
+  process.env.VISION_BASE_URL ?? "https://api.siliconflow.cn/v1/chat/completions";
+const VISION_MODEL = process.env.VISION_MODEL ?? "Qwen/Qwen2.5-VL-32B-Instruct";
+const VISION_TIMEOUT_MS = 60000; // 视觉模型较慢，60s 超时
+
 export async function recognizeImage(system: string, user: string, imageDataUri: string): Promise<string> {
-  const result = await requestWithRetry(
-    [
-      { role: "system", content: system },
-      {
-        role: "user",
-        content: [
-          { type: "text", text: user },
-          { type: "image_url", image_url: { url: imageDataUri } },
+  const key = process.env.VISION_API_KEY;
+  if (!key) {
+    throw new Error(
+      "未配置视觉模型：服务端缺少 VISION_API_KEY 环境变量。可在硅基流动（siliconflow.cn）免费申请一个 Key 并配置，即可使用截图识别。"
+    );
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), VISION_TIMEOUT_MS);
+  try {
+    const res = await fetch(VISION_BASE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model: VISION_MODEL,
+        messages: [
+          { role: "system", content: system },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: user },
+              { type: "image_url", image_url: { url: imageDataUri } },
+            ],
+          },
         ],
-      },
-    ],
-    0.3,
-  );
-  return result.content;
+        temperature: 0.3,
+        max_tokens: 4096,
+        stream: false,
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`视觉模型 ${res.status}: ${text.slice(0, 200)}`);
+    }
+    const data = await res.json();
+    const content = (data as any)?.choices?.[0]?.message?.content;
+    if (typeof content !== "string") throw new Error("视觉模型返回格式异常");
+    return content;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** 从 AI 文本中安全提取 JSON（容忍 markdown 代码块围栏） */
