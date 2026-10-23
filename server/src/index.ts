@@ -581,6 +581,56 @@ app.get("/api/v1/people/:id/temperatures", requirePin, async (req, res) => {
 });
 
 // ============ 截图识别 ============
+// AI 分句：把整段粘贴的聊天记录拆成 逐条+说话人，供「逐句确认」模式回填
+app.post("/api/v1/parse-chat", requirePin, async (req, res) => {
+  try {
+    const { text, person_name: personName } = req.body ?? {};
+    if (!text || typeof text !== "string" || !text.trim()) {
+      return fail(res, "缺少聊天内容", 400, 400);
+    }
+    const other = typeof personName === "string" && personName.trim() ? personName.trim() : "对方";
+    const system = `你是聊天记录整理助手。用户会给你一段微信聊天记录（可能没有说话人标注、可能混在一起）。你的任务：
+1. 按时间顺序拆成一句一条；
+2. 判断每条是谁说的：「我」（用户本人）或「${other}」；
+3. 合并同一人连续的重复换行，去掉表情符号说明和系统消息（如"对方撤回了一条消息"可忽略）。
+只输出 JSON，格式：{"messages":[{"speaker":"我","text":"..."},{"speaker":"${other}","text":"..."}]}
+speaker 只允许"我"或"${other}"两种取值。不要输出任何解释。`;
+    const result = await chat(system, text, 0.2);
+    const parsed = extractJson(result.content) as { messages?: { speaker?: string; text?: string }[] } | null;
+    const messages = (parsed?.messages ?? [])
+      .filter((m) => m && typeof m.text === "string" && m.text.trim())
+      .map((m) => ({ speaker: m.speaker === "我" ? "我" : other, text: (m.text as string).trim() }));
+    if (!messages.length) throw new Error("未能从这段内容中识别出对话，请检查格式或改用逐句输入");
+    ok(res, { messages });
+  } catch (e: any) {
+    fail(res, e?.message || "AI 分句失败", 502, 502);
+  }
+});
+
+// AI 快速建档：从一段聊天记录里提取称呼/关系/背景，回填新增人物表单
+app.post("/api/v1/people/extract-profile", requirePin, async (req, res) => {
+  try {
+    const { text } = req.body ?? {};
+    if (!text || typeof text !== "string" || !text.trim()) {
+      return fail(res, "缺少聊天内容", 400, 400);
+    }
+    const system = `你是人物档案助手。用户给你一段 TA 和某个人的聊天记录，请推断：
+- name：对方怎么被称呼（从聊天里找称呼/昵称；找不到就给 null）
+- relationship：最可能的关系，从这些里选一个：朋友/同学/同事/家人/恋人/老师/客户（实在不确定给 null）
+- background：一两句话概括这个人的性格特点和近期状态（如"外向爱开玩笑，最近在准备考试"），只依据聊天里能看出的信息，不要编造
+只输出 JSON：{"name":...,"relationship":...,"background":...}，不要输出任何解释。`;
+    const result = await chat(system, text, 0.4);
+    const parsed = (extractJson(result.content) ?? {}) as { name?: string; relationship?: string; background?: string };
+    ok(res, {
+      name: typeof parsed.name === "string" ? parsed.name.slice(0, 20) : undefined,
+      relationship: typeof parsed.relationship === "string" ? parsed.relationship.slice(0, 20) : undefined,
+      background: typeof parsed.background === "string" ? parsed.background.slice(0, 200) : undefined,
+    });
+  } catch (e: any) {
+    fail(res, e?.message || "AI 建档失败", 502, 502);
+  }
+});
+
 app.post("/api/v1/recognize", requirePin, upload.single("image"), async (req, res) => {
   try {
     const personName = (req.body.person_name as string) ?? "";
