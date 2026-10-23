@@ -149,9 +149,14 @@ export const api = {
       text,
       person_name: personName,
     }),
-  /** 从一段聊天里提取人物档案（称呼/关系/背景），用于 AI 快速建档 */
+  /** 从一段聊天里提取人物档案（称呼/关系/背景/重要日期），用于 AI 快速建档 */
   extractProfile: (text: string) =>
-    request<{ name?: string; relationship?: string; background?: string }>(
+    request<{
+      name?: string;
+      relationship?: string;
+      background?: string;
+      dates?: { name: string; month_day: string }[];
+    }>(
       "POST",
       "/api/v1/people/extract-profile",
       { text },
