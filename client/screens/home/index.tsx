@@ -44,15 +44,29 @@ export default function HomeScreen() {
     setAiFilling(true);
     try {
       const p = await api.extractProfile(aiText);
-      setForm((f) => ({
-        ...f,
-        name: p.name?.trim() ? p.name.trim() : f.name,
-        relationship: p.relationship?.trim() ? p.relationship.trim() : f.relationship,
-        background: p.background?.trim() ? p.background.trim() : f.background,
-      }));
-      Alert.alert('AI 填好了', p.name ? '已经帮你填好，看看对不对，改动后保存即可。' : 'AI 没从这段话里认出称呼，你可以只参考「背景备注」，或直接手动填。');
+      const filled: string[] = [];
+      setForm((f) => {
+        const next = { ...f };
+        if (p.name?.trim()) { next.name = p.name.trim(); filled.push('称呼'); }
+        if (p.relationship?.trim()) { next.relationship = p.relationship.trim(); filled.push('关系'); }
+        if (p.background?.trim()) { next.background = p.background.trim(); filled.push('背景'); }
+        if (p.dates?.length) {
+          next.dates = [
+            ...f.dates.filter((d) => d.name.trim() || d.month_day.trim()),
+            ...p.dates.map((d) => ({ name: d.name, month_day: d.month_day })),
+          ];
+          filled.push('重要日期');
+        }
+        return next;
+      });
+      Alert.alert(
+        filled.length ? 'AI 填好了' : 'AI 没认出什么',
+        filled.length
+          ? `已帮你填好：${filled.join('、')}。往下翻核对一下，改完保存即可。`
+          : '这段聊天里看不出称呼/关系等信息。你可以只参考它写「背景备注」，或直接手动填。'
+      );
     } catch (e: any) {
-      Alert.alert('AI 填充失败', `${e?.message ?? '请稍后重试'}。不影响手动填写。`);
+      Alert.alert('AI 填充失败', `${e?.message ?? '请稍后重试'}`);
     } finally {
       setAiFilling(false);
     }
@@ -429,7 +443,7 @@ export default function HomeScreen() {
       <TouchableOpacity
         onPress={openAdd}
         activeOpacity={0.85}
-        className="absolute right-5 bottom-10 h-14 px-5 rounded-2xl bg-accent flex-row items-center"
+        className="absolute right-5 bottom-[104px] h-14 px-5 rounded-2xl bg-accent flex-row items-center"
         style={{ shadowColor: '#E4572E', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.35, shadowRadius: 10, elevation: 6 }}
       >
         <Text className="text-white text-[24px] font-light mr-1.5" style={{ marginTop: -2 }}>＋</Text>
@@ -456,10 +470,10 @@ export default function HomeScreen() {
                   <TextInput
                     value={aiText}
                     onChangeText={setAiText}
-                    placeholder="粘贴最近的一段聊天…（不想用就直接在下面手动填）"
+                    placeholder={'从微信长按消息→多选→合并转发→复制，整段粘到这里。\n带昵称、时间戳都没关系，AI 会自动忽略。'}
                     placeholderTextColor="#C9C9C9"
                     multiline
-                    className="bg-surface rounded-xl border border-border px-3 py-2.5 text-[14px] text-foreground min-h-[64px] mb-2"
+                    className="bg-surface rounded-xl border border-border px-3 py-2.5 text-[14px] text-foreground min-h-[110px] mb-2"
                   />
                   <TouchableOpacity
                     onPress={aiFill}
