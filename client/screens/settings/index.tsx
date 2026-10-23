@@ -132,7 +132,10 @@ export default function SettingsScreen() {
         URL.revokeObjectURL(url);
         Alert.alert('已导出', `${filename} 已开始下载（${people.length} 位人物、${analyses.length} 条分析记录）`);
       } else {
-        Alert.alert('已生成', `共 ${people.length} 位人物、${analyses.length} 条分析记录。原生端导出文件功能即将上线。`);
+        // 原生端：写文件 → 系统分享（可存到文件管理器/发给自己）
+        const { shareTextFile } = await import('@/utils/api');
+        await shareTextFile(json, filename);
+        Alert.alert('已导出', `${filename} 已通过系统分享发出（${people.length} 位人物、${analyses.length} 条分析记录）。`);
       }
     } catch (e: any) {
       Alert.alert('导出失败', e?.message);
@@ -293,9 +296,11 @@ export default function SettingsScreen() {
                 粘贴之前导出的 JSON 备份内容，或选择备份文件。导入会按记录 ID 合并（已存在则更新），不会删除现有数据。
               </Text>
               <View className="flex-row gap-2 mb-3">
-                <TouchableOpacity onPress={pickBackupFile} className="px-4 h-9 rounded-full bg-accent-soft items-center justify-center">
-                  <Text className="text-[13px] text-accent font-medium">选择备份文件</Text>
-                </TouchableOpacity>
+                {Platform.OS === 'web' && (
+                  <TouchableOpacity onPress={pickBackupFile} className="px-4 h-9 rounded-full bg-accent-soft items-center justify-center">
+                    <Text className="text-[13px] text-accent font-medium">选择备份文件</Text>
+                  </TouchableOpacity>
+                )}
               </View>
               <TextInput
                 value={importText}
@@ -353,7 +358,7 @@ export default function SettingsScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity
-          onPress={() => (Platform.OS === 'web' ? setImportModal(true) : Alert.alert('提示', '导入请在网页版使用'))}
+          onPress={() => setImportModal(true)}
           className="bg-surface rounded-2xl p-4 mb-3 border border-border flex-row items-center justify-between"
         >
           <Text className="text-[14px] text-foreground">导入备份（粘贴 / 选择文件）</Text>
