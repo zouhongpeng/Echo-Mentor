@@ -84,8 +84,8 @@ export default function AnalyzeScreen() {
     } catch { return undefined; }
   };
 
-  // 对话输入模式：bubble=逐句标说话人（支持多段落/多天合并）/ paste=整段粘贴
-  const [inputMode, setInputMode] = useState<'bubble' | 'paste'>('bubble');
+  // 对话输入模式：bubble=逐句标说话人（支持多段落/多天合并）/ paste=整段粘贴（推荐，配 AI 分句）
+  const [inputMode, setInputMode] = useState<'bubble' | 'paste'>('paste');
   type Msg = { speaker: 'me' | 'them'; text: string };
   const [segments, setSegments] = useState<{ date: string; items: Msg[] }[]>([
     { date: '', items: [{ speaker: 'them', text: '' }, { speaker: 'me', text: '' }] },
@@ -274,6 +274,32 @@ export default function AnalyzeScreen() {
     }
   };
 
+  // AI 分句：把整段粘贴的原始聊天记录拆成逐句+说话人，回填「逐句确认」模式
+  const [parsing, setParsing] = useState(false);
+  const smartParse = async () => {
+    if (!chatInput.trim() || parsing) return;
+    setParsing(true);
+    try {
+      const { messages } = await api.parseChat(chatInput, personName);
+      // 转成本地段落结构（单段）
+      setSegments([
+        {
+          date: '',
+          items: messages.map((m) => ({
+            speaker: (m.speaker === '我' ? 'me' : 'them') as 'me' | 'them',
+            text: m.text,
+          })),
+        },
+      ]);
+      setInputMode('bubble');
+      Alert.alert('AI 分句完成', '已按对话逐句拆开并标好谁说的，快速核对或修改后即可分析。');
+    } catch (e: any) {
+      Alert.alert('AI 分句失败', `${e?.message ?? '请重试'}。你也可以直接点下方按钮发起分析（AI 会自行理解整段文字）。`);
+    } finally {
+      setParsing(false);
+    }
+  };
+
   const buildShotText = () => shotMessages.map((m) => `${m.speaker === '我' ? '我' : personName}：${m.text}`).join('\n');
 
   const useShot = () => {
@@ -306,7 +332,7 @@ export default function AnalyzeScreen() {
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 60 }}>
         {/* 分析入口说明 */}
         <Text className="mt-3 text-[13px] text-muted leading-5">
-          一句一句填对话，每句标上是谁说的，AI 就能分清「我说的」和「{personName}说的」；也可以直接粘贴或用截图识别。
+          推荐直接粘贴聊天记录，AI 自动分清谁说的；也可以逐句确认，或用截图识别。
         </Text>
 
         {/* 双输入 */}
@@ -319,13 +345,13 @@ export default function AnalyzeScreen() {
                   onPress={() => setInputMode('bubble')}
                   className={`px-3 h-7 rounded-full items-center justify-center ${inputMode === 'bubble' ? 'bg-white shadow-sm' : ''}`}
                 >
-                  <Text className={`text-[12px] ${inputMode === 'bubble' ? 'text-foreground font-semibold' : 'text-muted'}`}>逐句输入</Text>
+                  <Text className={`text-[12px] ${inputMode === 'bubble' ? 'text-foreground font-semibold' : 'text-muted'}`}>逐句确认</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={() => setInputMode('paste')}
                   className={`px-3 h-7 rounded-full items-center justify-center ${inputMode === 'paste' ? 'bg-white shadow-sm' : ''}`}
                 >
-                  <Text className={`text-[12px] ${inputMode === 'paste' ? 'text-foreground font-semibold' : 'text-muted'}`}>整段粘贴</Text>
+                  <Text className={`text-[12px] ${inputMode === 'paste' ? 'text-foreground font-semibold' : 'text-muted'}`}>直接粘贴</Text>
                 </TouchableOpacity>
               </View>
               <TouchableOpacity onPress={pickImage} className="px-3 h-8 bg-accent-soft rounded-full items-center justify-center">
@@ -335,15 +361,29 @@ export default function AnalyzeScreen() {
           </View>
 
           {inputMode === 'paste' ? (
-            <TextInput
-              value={chatInput}
-              onChangeText={setChatInput}
-              placeholder={`例：\n${personName}：昨天加班到很晚，累死了\n我：那你早点休息吧`}
-              placeholderTextColor="#C9C9C9"
-              multiline
-              textAlignVertical="top"
-              className="bg-surface rounded-2xl border border-border px-4 py-3 text-[15px] text-foreground min-h-[150px]"
-            />
+            <View>
+              <TextInput
+                value={chatInput}
+                onChangeText={setChatInput}
+                placeholder={`直接粘贴和 ${personName} 的聊天记录即可，不用标注谁说的。\n例：\n昨天加班到很晚，累死了\n那你早点休息吧`}
+                placeholderTextColor="#C9C9C9"
+                multiline
+                textAlignVertical="top"
+                className="bg-surface rounded-2xl border border-border px-4 py-3 text-[15px] text-foreground min-h-[150px]"
+              />
+              {/* AI 一键分句：粘贴完先分句核对，再分析更准 */}
+              <TouchableOpacity
+                onPress={smartParse}
+                disabled={parsing || !chatInput.trim()}
+                className="mt-2 h-9 rounded-full bg-accent-soft items-center justify-center flex-row self-start px-4"
+              >
+                {parsing ? (
+                  <ActivityIndicator size="small" color="#E4572E" />
+                ) : (
+                  <Text className="text-[12px] text-accent font-medium">✨ AI 分句 · 逐句核对（可选）</Text>
+                )}
+              </TouchableOpacity>
+            </View>
           ) : (
             <View>
               {segments.map((seg, si) => (
