@@ -14,6 +14,7 @@ import {
 import { withUniwind } from 'uniwind';
 import { useSafeAreaInsets, Edge } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import { usePathname } from 'expo-router';
 // 引入 KeyboardAware 系列组件
 import {
   KeyboardAwareScrollView,
@@ -198,6 +199,13 @@ const RawScreen = ({
   // 强制禁用 iOS 自动调整内容区域，完全由手动 padding 控制，消除系统自动计算带来的多余空白
   const contentInsetBehaviorIOS = 'never';
 
+  // 悬浮 TabBar（FlowTabBar）底栏高度补偿：
+  // 该栏为 absolute 浮层（高 62 + 底部偏移），SafeArea 之外会盖住页面底部内容，
+  // 因此凡挂在底栏上的页面（人物/周报/学院/设置）额外补足留白，避免文字被挡。
+  const pathname = usePathname();
+  const FLOATING_TAB_ROUTES = ['/', '/report', '/academy', '/settings'];
+  const tabPad = FLOATING_TAB_ROUTES.includes(pathname) ? 86 : 0; // 62(栏高) + 8(偏移) + 16(呼吸)
+
   const wrapperStyle: ViewStyle = {
     flex: 1,
     backgroundColor,
@@ -206,7 +214,7 @@ const RawScreen = ({
     paddingRight: hasRight ? insets.right : 0,
     // 当页面不使用外层 ScrollView 时（子树本身可滚动），由外层 View 负责底部安全区
     paddingBottom: (childIsNativeScrollable && hasBottom)
-      ? (keyboardShown ? 0 : insets.bottom)
+      ? (keyboardShown ? 0 : insets.bottom) + tabPad
       : 0,
   };
 
@@ -221,7 +229,7 @@ const RawScreen = ({
     contentContainerStyle: {
       flexGrow: 1,
       // 滚动模式下，Bottom 安全区由内容容器处理，保证内容能完整显示且不被 Home Indicator 遮挡，同时背景色能延伸到底部
-      paddingBottom: hasBottom ? (keyboardShown ? 0 : insets.bottom) : 0,
+      paddingBottom: hasBottom ? (keyboardShown ? 0 : insets.bottom) + tabPad : 0,
     },
     keyboardShouldPersistTaps: 'handled' as const,
     showsVerticalScrollIndicator: false,
@@ -249,7 +257,7 @@ const RawScreen = ({
           <KeyboardAwareScrollable
             key={el.key ?? idx}
             element={el}
-            extraPadding={keyboardShown ? 0 : (hasBottom ? insets.bottom : 0)}
+            extraPadding={keyboardShown ? 0 : (hasBottom ? insets.bottom : 0) + tabPad}
             contentInsetBehaviorIOS={contentInsetBehaviorIOS}
           />
         );
