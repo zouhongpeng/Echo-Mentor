@@ -39,6 +39,18 @@ const ok = (res: Response, data: unknown, status = 200) => res.status(status).js
 const fail = (res: Response, msg: string, status = 400, code = 1) =>
   res.status(status).json({ code, msg });
 
+/** AI 相关错误统一翻译成用户能看懂的话（缺 Key / 额度不足等） */
+const aiErrMsg = (e: any): string => {
+  const raw = e?.message ? String(e.message) : "";
+  if (/DEEPSEEK_API_KEY|VISION_API_KEY/.test(raw)) {
+    return "AI 服务未配置：当前环境没有接入 AI（界面和数据功能不受影响）。正式部署后在服务端配置 DEEPSEEK_API_KEY 即可使用全部 AI 功能。";
+  }
+  if (/Insufficient|insufficient|credits|balance|quota|402/i.test(raw)) {
+    return "AI 额度不足：请到平台充值或更换可用的 API Key 后重试。";
+  }
+  return raw || "AI 服务暂不可用，请稍后重试";
+};
+
 // PIN 状态（内存简单会话）
 let sessionPinHash: string | null = null;
 let pinInitialized: boolean | null = null;
@@ -398,7 +410,7 @@ app.post("/api/v1/analyze", requirePin, async (req, res) => {
       }
     })();
   } catch (e: any) {
-    fail(res, e?.message || "分析失败", 400);
+    fail(res, aiErrMsg(e), 502, 502);
   }
 });
 
@@ -603,7 +615,7 @@ speaker 只允许"我"或"${other}"两种取值。不要输出任何解释。`;
     if (!messages.length) throw new Error("未能从这段内容中识别出对话，请检查格式或改用逐句输入");
     ok(res, { messages });
   } catch (e: any) {
-    fail(res, e?.message || "AI 分句失败", 502, 502);
+    fail(res, aiErrMsg(e), 502, 502);
   }
 });
 
@@ -614,20 +626,30 @@ app.post("/api/v1/people/extract-profile", requirePin, async (req, res) => {
     if (!text || typeof text !== "string" || !text.trim()) {
       return fail(res, "缺少聊天内容", 400, 400);
     }
-    const system = `你是人物档案助手。用户给你一段 TA 和某个人的聊天记录，请推断：
-- name：对方怎么被称呼（从聊天里找称呼/昵称；找不到就给 null）
+    const system = `你是人物档案助手。用户给你一段 TA 和某个人的聊天记录（可能是从微信直接复制出来的，会带时间戳、昵称、"XX撤回了一条消息"等杂讯，请忽略杂讯）。请推断：
+- name：对方怎么被称呼（从聊天里找称呼/昵称，如聊天记录里显示的名字；找不到就给 null）
 - relationship：最可能的关系，从这些里选一个：朋友/同学/同事/家人/恋人/老师/客户（实在不确定给 null）
 - background：一两句话概括这个人的性格特点和近期状态（如"外向爱开玩笑，最近在准备考试"），只依据聊天里能看出的信息，不要编造
-只输出 JSON：{"name":...,"relationship":...,"background":...}，不要输出任何解释。`;
+- dates：聊天里明确提到的重要日期（如"我生日快到了"且能确定大概日期），格式 [{"name":"生日","month_day":"3-20"}]；没有就给 []
+month_day 格式必须是 "月-日" 两位数如 "3-20"、"12-01"。宁可给 null/[] 也不要编造。
+只输出 JSON：{"name":...,"relationship":...,"background":...,"dates":[...]}，不要输出任何解释。`;
     const result = await chat(system, text, 0.4);
-    const parsed = (extractJson(result.content) ?? {}) as { name?: string; relationship?: string; background?: string };
+    const parsed = (extractJson(result.content) ?? {}) as {
+      name?: string; relationship?: string; background?: string;
+      dates?: { name?: string; month_day?: string }[];
+    };
+    const dates = (Array.isArray(parsed.dates) ? parsed.dates : [])
+      .filter((d) => d && typeof d.name === "string" && /^\d{1,2}-\d{1,2}$/.test(d.month_day ?? ""))
+      .slice(0, 3)
+      .map((d) => ({ name: d.name!.slice(0, 20), month_day: d.month_day! }));
     ok(res, {
       name: typeof parsed.name === "string" ? parsed.name.slice(0, 20) : undefined,
       relationship: typeof parsed.relationship === "string" ? parsed.relationship.slice(0, 20) : undefined,
       background: typeof parsed.background === "string" ? parsed.background.slice(0, 200) : undefined,
+      dates,
     });
   } catch (e: any) {
-    fail(res, e?.message || "AI 建档失败", 502, 502);
+    fail(res, aiErrMsg(e), 502, 502);
   }
 });
 
@@ -651,7 +673,7 @@ app.post("/api/v1/recognize", requirePin, upload.single("image"), async (req, re
     }
     ok(res, { messages });
   } catch (e: any) {
-    fail(res, e?.message || "识别失败，请手动粘贴", 500, 500);
+    fail(res, aiErrMsg(e), 502, 502);
   }
 });
 
@@ -795,7 +817,7 @@ app.post("/api/v1/rehearse", requirePin, async (req, res) => {
     if (!parsed) return fail(res, "复盘结果无法解析", 500, 500);
     ok(res, { feedback: parsed });
   } catch (e: any) {
-    fail(res, e?.message || "演练服务暂不可用", 500, 500);
+    fail(res, aiErrMsg(e), 502, 502);
   }
 });
 
@@ -829,7 +851,7 @@ app.get("/api/v1/people/:id/portrait", requirePin, async (req, res) => {
     if (!parsed) return fail(res, "画像生成失败，请稍后再试", 500, 500);
     ok(res, parsed);
   } catch (e: any) {
-    fail(res, e?.message || "画像生成失败", 500, 500);
+    fail(res, aiErrMsg(e), 502, 502);
   }
 });
 
@@ -899,7 +921,7 @@ app.post("/api/v1/reports/generate", requirePin, async (req, res) => {
     if (ie) throw ie;
     ok(res, { id: ins?.id, content }, 201);
   } catch (e: any) {
-    fail(res, e?.message || "生成周报失败", 500, 500);
+    fail(res, aiErrMsg(e), 502, 502);
   }
 });
 
