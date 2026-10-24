@@ -4,7 +4,7 @@
  */
 // Web 构建默认走同源相对路径（后端托管静态页时无需配置）；原生端默认本机 9091
 import { Platform } from "react-native";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy"; // SDK54：legacy API 单独导出
 import * as Sharing from "expo-sharing";
 
 const BASE_URL =

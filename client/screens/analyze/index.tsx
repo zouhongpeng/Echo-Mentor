@@ -262,11 +262,23 @@ export default function AnalyzeScreen() {
         });
       } catch { return uri; }
     }
-    // 原生端：expo-image-manipulator 压缩
+    // 原生端：expo-image-manipulator 压缩（新旧 API 特性检测，均不可用则跳过压缩）
     try {
-      const IM = await import('expo-image-manipulator');
-      const res = await (IM as any).manipulateAsync(uri, [{ resize: { width: 1000 } }], { compress: 0.85, format: (IM as any).SaveFormat.JPEG });
-      return res.uri;
+      const IM: any = await import('expo-image-manipulator');
+      const mod: any = IM?.default ?? IM;
+      if (mod?.ImageManipulator && typeof mod.ImageManipulator.manipulate === 'function') {
+        // 新 API（SDK 52+）：context 式
+        const ctx = mod.ImageManipulator.manipulate(uri, [{ resize: { width: 1000 } }]);
+        const rendered = await ctx.renderAsync();
+        const saved = await rendered.saveAsync({ compress: 0.85, format: mod.SaveFormat.JPEG });
+        return saved.uri;
+      }
+      if (typeof mod?.manipulateAsync === 'function') {
+        // 旧 API：manipulateAsync
+        const res = await mod.manipulateAsync(uri, [{ resize: { width: 1000 } }], { compress: 0.85, format: mod.SaveFormat?.JPEG ?? 1 });
+        return res.uri;
+      }
+      return uri;
     } catch { return uri; }
   };
 

@@ -13,6 +13,7 @@ import { memoryDb } from "./storage/database/memory-db";
 import { runAnalysis, prepareAnonymized, summerizeRecords, shouldModerate, extractProfileFacts, extractTiming, MODERATION_REPLY, type GrowthMode } from "./ai/analysis";
 import { recognizeImage, chat, extractJson, getVisionConfig } from "./ai/deepseek";
 import { buildStageSection } from "./ai/methodologies";
+import os from "os";
 import { buildReportDocx, buildAnalysisDocx, buildFullArchiveDocx } from "./docx";
 import { generateWeeklyReport } from "./ai/report";
 import { sha256, anonymize } from "./ai/anonymize";
@@ -712,7 +713,14 @@ app.put("/api/v1/settings/vision", requirePin, async (req, res) => {
       model: (typeof model === "string" && model.trim()) || undefined,
       updated_at: new Date().toISOString(),
     };
-    fsSync.writeFileSync(path.resolve(process.cwd(), "vision.local.json"), JSON.stringify(cfg, null, 2));
+    const data = JSON.stringify(cfg, null, 2);
+    // 写入回退：程序目录（本地/演示）→ 系统临时目录（生产容器程序目录常只读）
+    const candidates = [path.resolve(process.cwd(), "vision.local.json"), path.resolve(os.tmpdir(), "vision.local.json")];
+    let savedPath = "";
+    for (const c of candidates) {
+      try { fsSync.writeFileSync(c, data); savedPath = c; break; } catch { /* 只读则下一个 */ }
+    }
+    if (!savedPath) throw new Error("无法写入配置文件（文件系统只读）");
     ok(res, { saved: true, model: cfg.model || getVisionConfig().model });
   } catch (e: any) {
     fail(res, e?.message || "保存失败", 500, 500);

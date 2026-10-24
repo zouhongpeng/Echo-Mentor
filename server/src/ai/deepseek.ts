@@ -7,6 +7,7 @@
 import crypto from "crypto";
 import fsSync from "fs";
 import path from "path";
+import os from "os";
 
 const BASE_URL = "https://api.deepseek.com/v1/chat/completions";
 const TIMEOUT_MS = 30000; // 30s 超时
@@ -112,10 +113,18 @@ export interface VisionConfig {
 }
 
 /** 运行时视觉配置：设置页文件 > 环境变量 > 默认智谱免费模型 */
+/** vision.local.json 可能所在位置（生产容器程序目录常只读，回退临时目录） */
+export function visionConfigPaths(): string[] {
+  return [
+    path.resolve(process.cwd(), "vision.local.json"),
+    path.resolve(os.tmpdir(), "vision.local.json"),
+  ];
+}
+
 export function getVisionConfig(): VisionConfig {
   try {
-    const p = path.resolve(process.cwd(), "vision.local.json");
-    if (fsSync.existsSync(p)) {
+    for (const p of visionConfigPaths()) {
+      if (!fsSync.existsSync(p)) continue;
       const j = JSON.parse(fsSync.readFileSync(p, "utf8"));
       if (j.api_key && String(j.api_key).length >= 10) {
         return {
@@ -125,6 +134,7 @@ export function getVisionConfig(): VisionConfig {
           source: "设置页",
         };
       }
+      break;
     }
   } catch { /* 配置文件损坏则忽略 */ }
   if (process.env.VISION_API_KEY) {
