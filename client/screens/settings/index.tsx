@@ -42,16 +42,23 @@ export default function SettingsScreen() {
   // 视觉模型（截图识别）状态
   const [visionInfo, setVisionInfo] = useState<{ configured: boolean; source: string; model: string; key_masked: string } | null>(null);
   const [visionKeyInput, setVisionKeyInput] = useState('');
+  const [visionUrlInput, setVisionUrlInput] = useState('');
+  const [visionModelInput, setVisionModelInput] = useState('');
   const [visionSaving, setVisionSaving] = useState(false);
   const loadVision = useCallback(async () => {
-    try { setVisionInfo(await api.visionSettings()); } catch { /* 静默 */ }
+    try {
+      const v = await api.visionSettings();
+      setVisionInfo(v);
+      setVisionUrlInput((s) => s || v.base_url || '');
+      setVisionModelInput((s) => s || v.model || '');
+    } catch { /* 静默 */ }
   }, []);
   React.useEffect(() => { loadVision(); }, [loadVision]);
   const saveVision = async () => {
     if (!visionKeyInput.trim() || visionSaving) return;
     setVisionSaving(true);
     try {
-      await api.saveVisionKey(visionKeyInput.trim());
+      await api.saveVisionKey(visionKeyInput.trim(), visionUrlInput.trim() || undefined, visionModelInput.trim() || undefined);
       setVisionKeyInput('');
       await loadVision();
       Alert.alert('已保存', '视觉模型配置已立即生效，去「帮我分析 → 截图识别」试试吧。');
@@ -382,6 +389,26 @@ export default function SettingsScreen() {
             autoCapitalize="none"
             autoCorrect={false}
             className="bg-on-surface rounded-xl px-3.5 h-11 text-[13px] text-foreground mb-2"
+          />
+          {/* 高级：接口地址与模型名（换服务商时才需要改，如豆包/硅基流动） */}
+          <Text className="text-[11px] text-muted/70 mb-1">换其他服务商时才需要改下面两项（默认智谱）：</Text>
+          <TextInput
+            value={visionUrlInput}
+            onChangeText={setVisionUrlInput}
+            placeholder="接口地址（默认智谱，豆包填 ark.cn-beijing.volces.com/api/v3/chat/completions）"
+            placeholderTextColor="#C9C9C9"
+            autoCapitalize="none"
+            autoCorrect={false}
+            className="bg-on-surface rounded-xl px-3.5 h-11 text-[12px] text-foreground mb-2"
+          />
+          <TextInput
+            value={visionModelInput}
+            onChangeText={setVisionModelInput}
+            placeholder="模型名（默认 glm-4.6v-flash，豆包如 doubao-seed-1.6-flash）"
+            placeholderTextColor="#C9C9C9"
+            autoCapitalize="none"
+            autoCorrect={false}
+            className="bg-on-surface rounded-xl px-3.5 h-11 text-[12px] text-foreground mb-2"
           />
           <TouchableOpacity
             onPress={saveVision}
