@@ -289,6 +289,7 @@ app.post("/api/v1/analyze", requirePin, async (req, res) => {
       my_reply: z.string().optional().default(""), // 点评模式下用户自己的回复
       style_examples: z.array(z.string()).optional().default([]), // 风格学习：过往采纳回复/本人想法
       tone: z.string().optional(),
+      stage: z.string().optional(), // 关系阶段（六选一，可选）
     });
     const body = schema.parse(req.body);
 
@@ -355,6 +356,7 @@ app.post("/api/v1/analyze", requirePin, async (req, res) => {
           myThought: anonymized.myThought,
           growthMode,
           tone: body.tone,
+          stage: body.stage,
           styleExamples: (body.style_examples ?? []).length
             ? body.style_examples.map((s: string) => anonymize(s, person.name)).join("\n")
             : undefined,

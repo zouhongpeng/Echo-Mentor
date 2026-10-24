@@ -7,7 +7,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import MeAvatar from '@/components/MeAvatar';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
-import * as ImageManipulator from 'expo-image-manipulator';
 import { useSafeRouter, useSafeSearchParams } from '@/hooks/useSafeRouter';
 import { Screen } from '@/components/Screen';
 import { api } from '@/utils/api';
@@ -121,6 +120,10 @@ export default function AnalyzeScreen() {
   const [picking, setPicking] = useState(false);
   const [shotStep, setShotStep] = useState<null | 'edit'>(null);
   const [shotImage, setShotImage] = useState<string | null>(null);
+
+  // 关系阶段（可选）：帮 AI 对症下药
+  const STAGE_OPTIONS = ['初识破冰', '了解升温', '暧昧推进', '线下见面', '表达心意', '长期维持'] as const;
+  const [selectedStage, setSelectedStage] = useState<string>('');
   const [shotMessages, setShotMessages] = useState<{ speaker: string; text: string }[]>([]);
 
   const doCopy = async (t: string) => {
@@ -185,6 +188,7 @@ export default function AnalyzeScreen() {
 
     try {
       const payload: any = { person_id: personId, chat_input: chat, thought_input: thought, tone };
+      if (selectedStage) payload.stage = selectedStage;
       if (gmode === 'critique') payload.my_reply = thought;
       if (styleExamples?.length) payload.style_examples = styleExamples;
       const res = await api.analyze(payload);
@@ -239,18 +243,31 @@ export default function AnalyzeScreen() {
 
   // 上传前压缩：手机截图普遍 2-5MB，缩到宽 1000px 能把识别速度提升数倍
   const resizeForUpload = async (uri: string): Promise<string> => {
+    if (Platform.OS === 'web') {
+      try {
+        return await new Promise<string>((resolve) => {
+          const img = new Image();
+          img.onload = () => {
+            const maxDim = 1000;
+            const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+            if (scale >= 1) return resolve(uri);
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.round(img.width * scale);
+            canvas.height = Math.round(img.height * scale);
+            canvas.getContext('2d')?.drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL('image/jpeg', 0.85));
+          };
+          img.onerror = () => resolve(uri);
+          img.src = uri;
+        });
+      } catch { return uri; }
+    }
     // 原生端：expo-image-manipulator 压缩
     try {
-      const res = await ImageManipulator.manipulateAsync(
-        uri,
-        [{ resize: { width: 1000 } }],
-        { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
-      );
+      const IM = await import('expo-image-manipulator');
+      const res = await (IM as any).manipulateAsync(uri, [{ resize: { width: 1000 } }], { compress: 0.85, format: (IM as any).SaveFormat.JPEG });
       return res.uri;
-    } catch {
-      // Web 端 expo-image-manipulator 不支持时直接返回原图（识别仍可用）
-      return uri;
-    }
+    } catch { return uri; }
   };
 
   // 选择截图
@@ -348,6 +365,22 @@ export default function AnalyzeScreen() {
         <Text className="mt-3 text-[13px] text-muted leading-5">
           推荐直接粘贴聊天记录，AI 自动分清谁说的；也可以逐句确认，或用截图识别。
         </Text>
+
+        {/* 关系阶段（可选）：AI 按阶段给对症建议 */}
+        <View className="mt-4">
+          <Text className="text-[12.5px] text-muted mb-1.5">关系阶段（可选，选了 AI 才知道该「慢慢来」还是「推一把」）</Text>
+          <View className="flex-row flex-wrap gap-1.5">
+            {STAGE_OPTIONS.map((st) => (
+              <TouchableOpacity
+                key={st}
+                onPress={() => setSelectedStage((cur) => (cur === st ? '' : st))}
+                className={`px-3 h-8 rounded-full items-center justify-center ${selectedStage === st ? 'bg-accent' : 'bg-surface border border-border'}`}
+              >
+                <Text className={`text-[12px] ${selectedStage === st ? 'text-white font-medium' : 'text-foreground/70'}`}>{st}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
 
         {/* 双输入 */}
         <View className="mt-5">
@@ -652,6 +685,7 @@ function ResultView({ result, marks, onCopy, onMark }: any) {
   const temp = result.temperature || {};
   const handleCopy = (t: string, key: string) => { onCopy(t); setCopiedNote(key); setTimeout(() => setCopiedNote(null), 1500); };
 
+  const tip = result.stage_tip;
   return (
     <View className="mt-8 rounded-3xl border border-border overflow-hidden" style={{ backgroundColor: '#ECECEC' }}>
       {/* 微信式：顶部居中「时间戳」位放场景与温度 */}
@@ -668,6 +702,20 @@ function ResultView({ result, marks, onCopy, onMark }: any) {
           </Text>
         </View>
       </View>
+      {/* 阶段推进建议 */}
+      {!!tip && (
+        <View className="mx-4 mb-1 rounded-2xl border border-accent/30 bg-accent/10 px-4 py-3">
+          <Text className="text-[12px] font-bold text-accent">下一步 · {tip.stage_now || '阶段建议'}</Text>
+          {!!tip.next && <Text className="mt-1 text-[13px] leading-5 text-foreground/85">{tip.next}</Text>}
+          {!!tip.actions?.length && (
+            <View className="mt-2 space-y-1">
+              {tip.actions.map((a: string, i: number) => (
+                <Text key={i} className="text-[12.5px] leading-5 text-foreground/75">□ {a}</Text>
+              ))}
+            </View>
+          )}
+        </View>
+      )}
 
       <View className="px-3.5 pt-2 pb-5">
         {/* 分享卡（Web 端下载 PNG） */}

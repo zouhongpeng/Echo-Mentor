@@ -758,6 +758,19 @@ function TimelineCard({ record, personaName, first, last, expanded, onToggle, on
                   ))}
                 </View>
               )}
+              {!!res.stage_tip && (
+                <View className="mt-2 rounded-2xl border border-accent/30 bg-accent/10 px-3.5 py-3">
+                  <Text className="text-[12px] font-bold text-accent">下一步 · {res.stage_tip.stage_now || '阶段建议'}</Text>
+                  {!!res.stage_tip.next && <Text className="mt-1 text-[13px] leading-5 text-foreground/85">{res.stage_tip.next}</Text>}
+                  {!!res.stage_tip.actions?.length && (
+                    <View className="mt-1.5">
+                      {res.stage_tip.actions.map((a: string, i: number) => (
+                        <Text key={i} className="text-[12.5px] leading-5 text-foreground/75">□ {a}</Text>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              )}
               {(() => {
                 const outcome = record.result?.outcome;
                 const usedAny = Object.values(record.result?.marks || {}).some(Boolean);

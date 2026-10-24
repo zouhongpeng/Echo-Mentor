@@ -3,6 +3,7 @@ import { anonymize } from "./anonymize";
 import {
   buildMethodologySection,
   buildPhraseSection,
+  buildStageSection,
   SCENES,
   SCENE_THEORY,
   METHODOLOGY_CARDS,
@@ -19,6 +20,7 @@ export interface AnalysisInput {
   myThought: string; // 我的想法（脱敏后）
   growthMode: GrowthMode;
   tone?: string;
+  stage?: string; // 用户手动指定的关系阶段（可选）
   styleExamples?: string; // 用户过往采纳回复/本人想法（风格学习，脱敏后）
 }
 
@@ -28,10 +30,11 @@ export interface AnalysisOutcome {
   suggestions: { style: string; text: string; reason: string; theory_tag?: string }[];
   notes: string[];
   temperature: { label: "热" | "温" | "冷"; reason: string };
+  stage_tip?: { stage_now?: string; next?: string; actions?: string[] }; // 关系阶段推进建议
 }
 
 /** 构建系统提示词（含全部防差错规范 + 沟通方法论引擎） */
-function buildSystem(mode: GrowthMode): string {
+function buildSystem(mode: GrowthMode, stage?: string): string {
   const modeRule =
     mode === "hint"
       ? "成长模式=提示：建议回复只给【思路方向】和【关键词】，绝不给可直接发送的完整原话。"
@@ -87,7 +90,8 @@ ${buildPhraseSection()}`;
   "thoughts": [{"point": "要点", "evidence": "依据：引用原句或‘信息有限，仅为可能’"}],
   "suggestions": [{"style": "真诚直接/幽默轻松/放缓节奏", "text": "具体建议（末尾附‘依据：XX方法’）", "reason": "一句话理由", "theory_tag": "非暴力沟通/关键对话/课题分离/表达频道 或留空"}],
   "notes": ["注意事项（0-2条节奏提醒，可含卡片使用要点/禁用提醒）"],
-  "temperature": {"label": "热/温/冷", "reason": "一句依据"}
+  "temperature": {"label": "热/温/冷", "reason": "一句依据"},
+  "stage_tip": {"stage_now": "你判断的当前关系阶段（初识破冰/了解升温/暧昧推进/线下见面/表达心意/长期维持 之一）", "next": "一句话说明当前最该做的推进/维持动作", "actions": ["本周可执行的具体动作1", "动作2"]}
 }
 - scene：五选一，判断结果标签。
 - thoughts：2-4 条
@@ -98,12 +102,13 @@ ${buildPhraseSection()}`;
 
 ${sceneRule}
 
-${modeRule}`;
+${modeRule}
+${buildStageSection(stage)}`;
 }
 
 /** 生成并解析一次分析 */
 export async function runAnalysis(input: AnalysisInput): Promise<AnalysisOutcome> {
-  const system = buildSystem(input.growthMode);
+  const system = buildSystem(input.growthMode, input.stage);
 
   const userContent = [
     "【人物背景档案】",
@@ -143,6 +148,13 @@ export async function runAnalysis(input: AnalysisInput): Promise<AnalysisOutcome
     temperature: parsed.temperature && ["热", "温", "冷"].includes(parsed.temperature.label)
       ? parsed.temperature
       : { label: "温", reason: "数据不足，暂判中性" },
+    stage_tip: parsed.stage_tip && typeof parsed.stage_tip === "object"
+      ? {
+          stage_now: typeof parsed.stage_tip.stage_now === "string" ? parsed.stage_tip.stage_now : undefined,
+          next: typeof parsed.stage_tip.next === "string" ? parsed.stage_tip.next : undefined,
+          actions: Array.isArray(parsed.stage_tip.actions) ? parsed.stage_tip.actions.filter((a: any) => typeof a === "string").slice(0, 3) : undefined,
+        }
+      : undefined,
   };
 }
 
