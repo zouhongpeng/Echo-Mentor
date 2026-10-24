@@ -6,7 +6,7 @@ import { useFocusEffect } from 'expo-router';
 import { useSafeRouter } from '@/hooks/useSafeRouter';
 import { Pressable } from 'react-native';
 import { Screen } from '@/components/Screen';
-import { api } from '@/utils/api';
+import { api, downloadDocx } from '@/utils/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import JellySwitch from '@/components/JellySwitch';
@@ -426,13 +426,31 @@ export default function SettingsScreen() {
         {/* 数据备份 */}
         <Text className="text-[15px] font-semibold text-foreground mt-2 mb-2">数据备份</Text>
         <TouchableOpacity
+          onPress={async () => {
+            try {
+              await downloadDocx("/api/v1/export/docx", `Echo-Mentor-全部档案-${new Date().toISOString().slice(0, 10)}.docx`);
+              Alert.alert("已导出", "全部档案 Word 文档已发出：所有人物、时间线分析和周报都在里面，可直接阅读或打印。");
+            } catch (e: any) {
+              Alert.alert("导出失败", e?.message);
+            }
+          }}
+          className="bg-accent rounded-2xl p-4 mb-3 flex-row items-center justify-between"
+        >
+          <View className="flex-1 mr-3">
+            <Text className="text-[14px] text-white font-semibold">导出全部档案（Word）</Text>
+            <Text className="text-[11px] text-white/70 mt-0.5">人物 + 时间线 + 周报 → 一份可读的 Word 文档</Text>
+          </View>
+          <Text className="text-white">›</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
           onPress={exportData}
           disabled={exporting}
           className="bg-surface rounded-2xl p-4 mb-3 border border-border flex-row items-center justify-between"
         >
           <View className="flex-1 mr-3">
-            <Text className="text-[14px] text-foreground">导出全部数据（JSON）</Text>
-            <Text className="text-[11px] text-muted mt-0.5">人物档案 + 分析记录 + 周报，建议定期备份</Text>
+            <Text className="text-[14px] text-foreground">导出备份数据（JSON）</Text>
+            <Text className="text-[11px] text-muted mt-0.5">换手机恢复用（机器可读格式），日常存档建议用上面的 Word 版</Text>
           </View>
           {exporting ? <ActivityIndicator size="small" color="#E4572E" /> : <Text className="text-muted">›</Text>}
         </TouchableOpacity>
