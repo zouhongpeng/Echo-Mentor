@@ -111,9 +111,10 @@ export async function recognizeImage(system: string, user: string, imageDataUri:
     );
   }
   const isZhipu = /bigmodel/i.test(VISION_BASE_URL) || /glm/i.test(VISION_MODEL);
-  // 智谱免费模型过载时自动降级到其他免费模型（同一个 Key 都能用）
+  // 智谱免费模型过载时自动降级（同一个 Key 都能用）：
+  // 4.6V-Flash（质量最好）→ 4V-Flash（最快）→ 4.1V-Thinking-Flash（慢但常存活）
   const candidates = isZhipu
-    ? [VISION_MODEL, "glm-4.1v-thinking-flash", "glm-4v-flash"].filter(
+    ? [VISION_MODEL, "glm-4v-flash", "glm-4.1v-thinking-flash"].filter(
         (m, i, arr) => m && arr.indexOf(m) === i,
       )
     : [VISION_MODEL];

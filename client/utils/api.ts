@@ -136,6 +136,7 @@ export const api = {
       method: "POST",
       headers: pinToken ? { "x-pin-token": pinToken } : {},
       body: formData,
+      signal: AbortSignal.timeout(100000), // 100s 兜底：超时提示重试而不是永远转圈
     }).then(async (r) => {
       const json = await r.json().catch(() => ({ code: r.status, msg: "识别失败" }));
       if (!r.ok) throw new Error(json.msg || "识别失败");

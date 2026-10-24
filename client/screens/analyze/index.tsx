@@ -236,6 +236,35 @@ export default function AnalyzeScreen() {
     try { await api.markSuggestion(recordId, index, used); } catch { /* 忽略 */ }
   };
 
+  // 上传前压缩：手机截图普遍 2-5MB，缩到宽 1000px 能把识别速度提升数倍
+  const resizeForUpload = async (uri: string): Promise<string> => {
+    if (Platform.OS === 'web') {
+      try {
+        return await new Promise<string>((resolve) => {
+          const img = new Image();
+          img.onload = () => {
+            const maxDim = 1000;
+            const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+            if (scale >= 1) return resolve(uri);
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.round(img.width * scale);
+            canvas.height = Math.round(img.height * scale);
+            canvas.getContext('2d')?.drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL('image/jpeg', 0.85));
+          };
+          img.onerror = () => resolve(uri);
+          img.src = uri;
+        });
+      } catch { return uri; }
+    }
+    // 原生端：expo-image-manipulator 压缩
+    try {
+      const IM = await import('expo-image-manipulator');
+      const res = await (IM as any).manipulateAsync(uri, [{ resize: { width: 1000 } }], { compress: 0.85, format: (IM as any).SaveFormat.JPEG });
+      return res.uri;
+    } catch { return uri; }
+  };
+
   // 选择截图
   const pickImage = async () => {
     try {
@@ -247,10 +276,12 @@ export default function AnalyzeScreen() {
         base64: false,
       });
       if (result2.canceled || !result2.assets?.length) return;
-      setShotImage(result2.assets[0].uri);
+      const picked = result2.assets[0];
+      const compressedUri = await resizeForUpload(picked.uri);
+      setShotImage(compressedUri);
       setShotMessages([]);
       setPicking(true);
-      await runRecognize({ uri: result2.assets[0].uri, mime: result2.assets[0].mimeType || 'image/jpeg', name: result2.assets[0].fileName || 'chat.jpg' });
+      await runRecognize({ uri: compressedUri, mime: 'image/jpeg', name: 'chat.jpg' });
     } catch (e: any) {
       Alert.alert('选择失败', e?.message);
     }
