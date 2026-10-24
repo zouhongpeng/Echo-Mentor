@@ -56,7 +56,12 @@ export default function SwipeRow({ children, onDelete, disabled }: { children: R
   return (
     <Animated.View
       style={{
-        height: removed ? 0 : heightF.interpolate({ inputRange: [0, 1], outputRange: [0, rowH] }),
+        // 平时高度自适应（展开/收起自由伸缩）；仅删除动画时锁高收缩
+        height: removed
+          ? 0
+          : closing
+            ? heightF.interpolate({ inputRange: [0, 1], outputRange: [0, rowH] })
+            : undefined,
         opacity,
         overflow: 'hidden',
       }}
@@ -73,8 +78,9 @@ export default function SwipeRow({ children, onDelete, disabled }: { children: R
         </View>
         <Animated.View
           onLayout={(e) => {
-            if (!rowH) setRowH(e.nativeEvent.layout.height);
-            if (!rowW) setRowW(e.nativeEvent.layout.width);
+            // 每次布局变化都更新（内容展开/收起高度会变），否则外层会按旧高度裁剪内容
+            setRowW(e.nativeEvent.layout.width);
+            setRowH(e.nativeEvent.layout.height);
           }}
           style={{ transform: [{ translateX: pan }], opacity }}
         >
