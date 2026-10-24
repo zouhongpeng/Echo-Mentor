@@ -12,6 +12,8 @@ __pycache__/
 *.egg-info/
 /.env
 .env
+# 例外：私有自用仓库，允许提交 server/.env（密钥随仓库走）
+!server/.env
 .cozeproj/reduction
 
 # JS/TS bundlers & build outputs
