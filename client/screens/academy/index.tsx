@@ -1,96 +1,182 @@
-import { useState, useEffect, useRef } from "react";
-import { View, Text, ScrollView, TouchableOpacity, useWindowDimensions } from "react-native";
+import { useState, useEffect, useCallback } from "react";
+import { View, Text, ScrollView, TouchableOpacity } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import { Screen } from "@/components/Screen";
+import { api } from "@/utils/api";
 import { METHOD_CARDS, REPLY_PHRASES, INTENT_PHRASES, ACADEMY_FOOTER, type MethodCard } from "@/constants/methodologies";
 import { useTheme } from "@/contexts/ThemeContext";
 
-/* 浅色：柔和粉彩；深色：低饱和深色调（同色相，保证深色模式可读） */
+/* 浅色：柔和粉彩；深色：低饱和深色调 */
 const CARD_GRADIENTS_LIGHT: [string, string][] = [
-  ["#FFD9CE", "#FFEFE9"], // 非暴力沟通 - 珊瑚暖
-  ["#D4E1F2", "#EDF2FA"], // 关键对话 - 雾蓝
-  ["#F3E3D8", "#FBF3EC"], // 课题分离 - 暖米
-  ["#E7DFEF", "#FAF5FC"], // 表达频道 - 雾紫
-  ["#D9EDE4", "#EFF9F4"], // 知觉检核 - 薄荷绿
-  ["#F2E6D0", "#FBF4E7"], // 校准问题 - 杏仁暖
-  ["#DCDFF2", "#F0F1FC"], // 情绪标注 - 长春花紫
-  ["#F6DCDC", "#FDEFEE"], // 仁慈归因 - 樱花粉
+  ["#FFD9CE", "#FFEFE9"],
+  ["#D4E1F2", "#EDF2FA"],
+  ["#F3E3D8", "#FBF3EC"],
+  ["#E7DFEF", "#FAF5FC"],
+  ["#D9EDE4", "#EFF9F4"],
+  ["#F2E6D0", "#FBF4E7"],
+  ["#DCDFF2", "#F0F1FC"],
+  ["#F6DCDC", "#FDEFEE"],
 ];
 const CARD_GRADIENTS_DARK: [string, string][] = [
-  ["#3A2A2B", "#221A20"], // 非暴力沟通 - 暗珊瑚
-  ["#22304A", "#161C2C"], // 关键对话 - 深海蓝
-  ["#3A3222", "#241F15"], // 课题分离 - 暗金
-  ["#33284A", "#1F1929"], // 表达频道 - 暗紫
-  ["#1F3629", "#142019"], // 知觉检核 - 暗薄荷
-  ["#3A3020", "#241E12"], // 校准问题 - 暗杏仁
-  ["#2B2845", "#1A1826"], // 情绪标注 - 暗长春花
-  ["#452323", "#291614"], // 仁慈归因 - 暗樱红
+  ["#3A2A2B", "#221A20"],
+  ["#22304A", "#161C2C"],
+  ["#3A3222", "#241F15"],
+  ["#33284A", "#1F1929"],
+  ["#1F3629", "#142019"],
+  ["#3A3020", "#241E12"],
+  ["#2B2845", "#1A1826"],
+  ["#452323", "#291614"],
 ];
 
+/* 使用统计：把服务端返回的风格标签聚合到对应方法卡上 */
+function useMethodUsage() {
+  const [usage, setUsage] = useState<{ counts: Record<string, number>; latest: Record<string, string> }>({ counts: {}, latest: {} });
+  const load = useCallback(async () => {
+    try {
+      const u = await api.academyUsage();
+      const counts: Record<string, number> = {};
+      const latest: Record<string, string> = {};
+      for (const card of METHOD_CARDS) {
+        let n = 0;
+        let last = "";
+        for (const [tag, c] of Object.entries(u.counts || {})) {
+          if (tag.includes(card.title) || card.title.includes(tag)) {
+            n += c;
+            const l = u.latest?.[tag];
+            if (l && (!last || l > last)) last = l;
+          }
+        }
+        counts[card.title] = n;
+        if (last) latest[card.title] = last;
+      }
+      setUsage({ counts, latest });
+    } catch { /* 静默：统计失败不影响浏览 */ }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  return { usage, reload: load };
+}
+
+function usageBadge(title: string, usage: { counts: Record<string, number>; latest: Record<string, string> }) {
+  const n = usage.counts[title] || 0;
+  if (!n) return null;
+  const last = usage.latest[title];
+  return (
+    <View className="px-2 py-0.5 rounded-full bg-accent-soft">
+      <Text className="text-[10.5px] text-accent font-medium">
+        已用 {n} 次{last ? ` · 最近 ${last.slice(5).replace("-", "/")}` : ""}
+      </Text>
+    </View>
+  );
+}
+
+/* 完整方法卡（展开时渲染） */
 function MethodPage({ card, index }: { card: MethodCard; index: number }) {
   const { resolvedTheme } = useTheme();
   const dark = resolvedTheme === "dark";
   const [from, to] = (dark ? CARD_GRADIENTS_DARK : CARD_GRADIENTS_LIGHT)[index % (dark ? CARD_GRADIENTS_DARK : CARD_GRADIENTS_LIGHT).length];
   return (
-    <View className="w-full px-4 py-3">
-      <LinearGradient
-        colors={[from, to]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        className="rounded-[28px] p-6"
-        style={{
-          shadowColor: dark ? "#000" : "#E4572E",
-          shadowOpacity: dark ? 0.5 : 0.12,
-          shadowRadius: 18,
-          shadowOffset: { width: 0, height: 8 },
-          elevation: 4,
-          borderWidth: 1,
-          borderColor: dark ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.6)",
-        }}
-      >
-        <Text className={`text-[11px] font-medium tracking-wider ${dark ? "text-white/45" : "text-foreground/50"}`}>沟通方法论 · 卡{index + 1}</Text>
-        <Text className="mt-1 text-[26px] font-bold text-foreground">{card.title}</Text>
-        <Text className={`mt-1 text-[12px] ${dark ? "text-white/55" : "text-foreground/60"}`}>来源：{card.source}</Text>
+    <LinearGradient
+      colors={[from, to]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      className="rounded-[24px] p-5 mt-2"
+      style={{ elevation: 3, borderWidth: 1, borderColor: dark ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.6)" }}
+    >
+      <Text className={`text-[11px] font-medium tracking-wider ${dark ? "text-white/45" : "text-foreground/50"}`}>沟通方法论 · {card.source}</Text>
+      <Text className="mt-1 text-[22px] font-bold text-foreground">{card.title}</Text>
 
-        <View className={`mt-4 rounded-2xl p-4 ${dark ? "bg-white/5" : "bg-surface/80"}`}>
-          <Text className="text-[12px] font-semibold text-accent">适用场景</Text>
-          <Text className="mt-1 text-[13px] leading-5 text-foreground">{card.scene}</Text>
-        </View>
+      <View className={`mt-3 rounded-2xl p-3.5 ${dark ? "bg-white/5" : "bg-surface/80"}`}>
+        <Text className="text-[12px] font-semibold text-accent">适用场景</Text>
+        <Text className="mt-1 text-[13px] leading-5 text-foreground">{card.scene}</Text>
+      </View>
 
-        <Text className="mt-5 text-[13px] font-semibold text-foreground">核心原则</Text>
-        <View className="mt-2 space-y-3">
-          {card.core.map((line, i) => (
-            <View key={i} className="flex-row gap-2.5">
-              <View className="mt-1.5 h-1.5 w-1.5 rounded-full bg-accent" />
-              <Text className="flex-1 text-[13px] leading-[21px] text-foreground/85">{line}</Text>
+      <Text className="mt-4 text-[13px] font-semibold text-foreground">核心原则</Text>
+      <View className="mt-2 space-y-3">
+        {card.core.map((line, i) => (
+          <View key={i} className="flex-row gap-2.5">
+            <View className="mt-1.5 h-1.5 w-1.5 rounded-full bg-accent" />
+            <Text className="flex-1 text-[13px] leading-[21px] text-foreground/85">{line}</Text>
+          </View>
+        ))}
+      </View>
+
+      <View className={`mt-4 rounded-2xl border p-3.5 ${dark ? "border-white/8 bg-white/5" : "border-border bg-surface/70"}`}>
+        <Text className="text-[12px] font-semibold text-foreground">使用要点</Text>
+        <Text className="mt-1 text-[12.5px] leading-5 text-foreground/75">{card.usage}</Text>
+        <View className="mt-2.5 h-px bg-border" />
+        <Text className="mt-2.5 text-[12px] font-semibold text-foreground">禁用提醒</Text>
+        <Text className="mt-1 text-[12.5px] leading-5 text-foreground/75">{card.forbid}</Text>
+      </View>
+
+      <View className={`mt-4 rounded-2xl px-4 py-3 ${dark ? "bg-white/10" : "bg-foreground"}`}>
+        <Text className={`text-[13px] leading-5 ${dark ? "text-white/90" : "text-surface"}`}>小结 · {card.summary}</Text>
+      </View>
+    </LinearGradient>
+  );
+}
+
+/* 闪卡自测 */
+function FlashCard({ card, index, total, onPrev, onNext }: { card: MethodCard; index: number; total: number; onPrev: () => void; onNext: () => void }) {
+  const [revealed, setRevealed] = useState(false);
+  useEffect(() => { setRevealed(false); }, [card.id]);
+  return (
+    <View className="px-4 pt-2">
+      <TouchableOpacity activeOpacity={0.85} onPress={() => setRevealed((r) => !r)}>
+        <LinearGradient
+          colors={["#3F3A36", "#2B2724"]}
+          className="rounded-[24px] p-6 min-h-[300px] justify-between"
+        >
+          <View>
+            <Text className="text-[11px] text-white/40 tracking-wider">闪卡自测 · {index + 1}/{total} · 点卡片翻面</Text>
+            <Text className="mt-3 text-[15px] leading-6 text-white/85">
+              场景：{card.scene}{"\n"}这道题你会怎么开口？
+            </Text>
+          </View>
+          {revealed ? (
+            <View>
+              <Text className="text-[22px] font-bold text-white">{card.title}</Text>
+              <Text className="mt-1 text-[11px] text-white/45">{card.source}</Text>
+              <Text className="mt-3 text-[13px] leading-5 text-white/80">{card.core[0]}</Text>
+              <View className="mt-3 rounded-xl px-3.5 py-2.5 bg-white/10">
+                <Text className="text-[12px] leading-4 text-white/75">小结 · {card.summary}</Text>
+              </View>
             </View>
-          ))}
-        </View>
-
-        <View className={`mt-5 rounded-2xl border p-4 ${dark ? "border-white/8 bg-white/5" : "border-border bg-surface/70"}`}>
-          <Text className="text-[12px] font-semibold text-foreground">使用要点</Text>
-          <Text className="mt-1 text-[12.5px] leading-5 text-foreground/75">{card.usage}</Text>
-          <View className="mt-3 h-px bg-border" />
-          <Text className="mt-3 text-[12px] font-semibold text-foreground">禁用提醒</Text>
-          <Text className="mt-1 text-[12.5px] leading-5 text-foreground/75">{card.forbid}</Text>
-        </View>
-
-        <View className={`mt-5 rounded-2xl px-4 py-3 ${dark ? "bg-white/10" : "bg-foreground"}`}>
-          <Text className={`text-[13px] leading-5 ${dark ? "text-white/90" : "text-surface"}`}>小结 · {card.summary}</Text>
-        </View>
-      </LinearGradient>
+          ) : (
+            <Text className="text-[13px] text-white/40">👆 想好了就点我揭晓</Text>
+          )}
+        </LinearGradient>
+      </TouchableOpacity>
+      <View className="flex-row items-center justify-between mt-3">
+        <TouchableOpacity onPress={onPrev} className="px-4 h-9 rounded-full bg-surface border border-border items-center justify-center">
+          <Text className="text-[13px] text-foreground">‹ 上一题</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setRevealed((r) => !r)} className="px-4 h-9 rounded-full bg-accent items-center justify-center">
+          <Text className="text-[13px] text-white font-medium">{revealed ? "藏起来" : "翻面"}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={onNext} className="px-4 h-9 rounded-full bg-surface border border-border items-center justify-center">
+          <Text className="text-[13px] text-foreground">下一题 ›</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
 
 export default function AcademyScreen() {
-  const [active, setActive] = useState(0);
-  const [tab, setTab] = useState<"method" | "phrase">("method");
+  const [tab, setTab] = useState<"learn" | "phrase">("learn");
+  const [mode, setMode] = useState<"list" | "flash">("list");
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [favs, setFavs] = useState<string[]>([]);
+  const [flashIdx, setFlashIdx] = useState(0);
+  const { usage } = useMethodUsage();
   const { resolvedTheme } = useTheme();
   const dark = resolvedTheme === "dark";
-  const pagingRef = useRef<ScrollView | null>(null);
+
+  // 每日一招：按一年中的第几天轮换，每天固定一招
+  const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000);
+  const daily = METHOD_CARDS[dayOfYear % METHOD_CARDS.length];
+  const dailyIdx = METHOD_CARDS.findIndex((c) => c.id === daily.id);
+  const [dailyOpen, setDailyOpen] = useState(false);
 
   useEffect(() => {
     AsyncStorage.getItem("echo_mentor_fav_phrases").then((v) => {
@@ -99,24 +185,22 @@ export default function AcademyScreen() {
   }, [tab]);
 
   const toggleFav = async (phrase: string) => {
-    const next = favs.includes(phrase) ? favs.filter((x) => x !== phrase) : [...favs, phrase];
+    const next = favs.includes(phrase) ? favs.filter((x) => x !== phrase) : [...favs.filter((x) => x !== phrase), phrase];
     setFavs(next);
     try { await AsyncStorage.setItem("echo_mentor_fav_phrases", JSON.stringify(next)); } catch { /* ignore */ }
   };
-  const { width } = useWindowDimensions();
-  const itemWidth = width;
 
   return (
     <Screen>
       <View className="px-5 pb-3 pt-2">
         <Text className="text-[28px] font-bold text-foreground tracking-tight">沟通学院</Text>
-        <Text className="mt-1 text-[12.5px] text-foreground/55">{METHOD_CARDS.length} 套方法论 + 高频回复话术，边看边用</Text>
+        <Text className="mt-1 text-[12.5px] text-foreground/55">{METHOD_CARDS.length} 套方法论，学一招、用一招、见证一招</Text>
       </View>
 
-      {/* 顶栏：方法论 / 话术速查 */}
+      {/* 顶栏：学习 / 话术速查 */}
       <View className="px-5 pb-3">
         <View className="flex-row bg-on-surface rounded-full p-0.5 self-start">
-          {([["method", "方法论"], ["phrase", "话术速查"]] as const).map(([key, label]) => (
+          {([["learn", "学习"], ["phrase", "话术速查"]] as const).map(([key, label]) => (
             <TouchableOpacity
               key={key}
               onPress={() => setTab(key)}
@@ -128,48 +212,77 @@ export default function AcademyScreen() {
         </View>
       </View>
 
-      {tab === "method" ? (
-        <>
-          <View className="px-5 pb-3">
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-              {METHOD_CARDS.map((c, i) => (
-                <TouchableOpacity
-                  key={c.id}
-                  activeOpacity={0.7}
-                  onPress={() => setActive(i)}
-                  className={`rounded-full px-4 h-9 items-center justify-center ${i === active ? "bg-accent" : "bg-surface border border-border"}`}
-                >
-                  <Text className={`text-[13.5px] font-medium ${i === active ? "text-white" : "text-foreground/70"}`}>
-                    {c.title}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+      {tab === "learn" ? (
+        <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
+          {/* 每日一招 */}
+          <View className="rounded-2xl border border-accent/30 bg-accent/10 px-4 py-3 mb-3 flex-row items-center justify-between">
+            <View className="flex-1 mr-2">
+              <Text className="text-[12px] font-semibold text-accent">今日一招 · {daily.title}</Text>
+              <Text className="text-[11.5px] text-foreground/60 mt-0.5" numberOfLines={1}>{daily.scene}</Text>
+            </View>
+            {usageBadge(daily.title, usage)}
+          </View>
+          <TouchableOpacity onPress={() => setDailyOpen((o) => !o)} className="self-start mb-1 ml-1">
+            <Text className="text-[12px] text-accent font-medium">{dailyOpen ? "收起今日一招 ↑" : "展开今日一招 ↓"}</Text>
+          </TouchableOpacity>
+          {dailyOpen && <MethodPage card={daily} index={dailyIdx} />}
+
+          {/* 模式切换：全部方法 / 闪卡自测 */}
+          <View className="flex-row bg-on-surface rounded-full p-0.5 self-start mt-4 mb-3">
+            {([["list", "全部方法"], ["flash", "闪卡自测"]] as const).map(([key, label]) => (
+              <TouchableOpacity
+                key={key}
+                onPress={() => setMode(key)}
+                className={`px-3.5 h-7 rounded-full items-center justify-center ${mode === key ? "bg-white shadow-sm" : ""}`}
+              >
+                <Text className={`text-[12px] ${mode === key ? "text-foreground font-semibold" : "text-foreground/60"}`}>{label}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
 
-          <View style={{ flex: 1 }}>
-            <ScrollView
-              horizontal
-              pagingEnabled
-              showsHorizontalScrollIndicator={false}
-              onMomentumScrollEnd={(e) => setActive(Math.round(e.nativeEvent.contentOffset.x / (itemWidth || width)))}
-            >
-              {METHOD_CARDS.map((card, i) => (
-                <View key={card.id} style={{ width: itemWidth }}>
-                  <MethodPage card={card} index={i} />
-                </View>
-              ))}
-            </ScrollView>
-          </View>
-        </>
+          {mode === "list" ? (
+            <>
+              <Text className="px-1 pb-2 text-[11.5px] text-foreground/45">点任意一招原地展开全文，再点收起。</Text>
+              {METHOD_CARDS.map((card, i) => {
+                const open = !!expanded[card.id];
+                return (
+                  <View key={card.id} className="mb-2">
+                    <TouchableOpacity
+                      onPress={() => setExpanded((s) => ({ ...s, [card.id]: !s[card.id] }))}
+                      className="bg-surface border border-border rounded-2xl px-4 py-3.5 flex-row items-center justify-between"
+                    >
+                      <View className="flex-1 mr-2">
+                        <View className="flex-row items-center gap-2 flex-wrap">
+                          <Text className="text-[15px] font-semibold text-foreground">{card.title}</Text>
+                          {usageBadge(card.title, usage)}
+                        </View>
+                        <Text className="text-[11.5px] text-foreground/55 mt-0.5" numberOfLines={1}>{card.scene}</Text>
+                      </View>
+                      <Text className="text-[12px] text-muted">{open ? "收起 ↑" : "展开 ↓"}</Text>
+                    </TouchableOpacity>
+                    {open && <MethodPage card={card} index={i} />}
+                  </View>
+                );
+              })}
+            </>
+          ) : (
+            <FlashCard
+              card={METHOD_CARDS[flashIdx % METHOD_CARDS.length]}
+              index={flashIdx % METHOD_CARDS.length}
+              total={METHOD_CARDS.length}
+              onPrev={() => setFlashIdx((i) => (i - 1 + METHOD_CARDS.length) % METHOD_CARDS.length)}
+              onNext={() => setFlashIdx((i) => (i + 1) % METHOD_CARDS.length)}
+            />
+          )}
+        </ScrollView>
       ) : (
         <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20 }}>
           <Text className="px-1 pb-2 text-[12px] leading-5 text-foreground/50">
-            以下句式供直接参考（点 ☆ 收藏常用句，AI 会优先化用你的收藏）。
+            句式供直接参考（点 ☆ 收藏常用句，分析时 AI 会模仿你的表达习惯）。
           </Text>
           {favs.length > 0 && (
             <View className="rounded-2xl px-4 py-3 mb-4 border border-accent/30" style={{ backgroundColor: dark ? "rgba(91,192,222,0.10)" : "rgba(91,192,222,0.08)" }}>
-              <Text className="text-[12px] font-semibold text-accent mb-1">我的收藏（{favs.length}）</Text>
+              <Text className="text-[12px] font-semibold text-accent mb-1">我的收藏（{favs.length}）· 已作为你的风格样本喂给 AI</Text>
               {favs.map((p, i) => (
                 <View key={i} className="flex-row items-start mb-1">
                   <Text className="flex-1 text-[13px] leading-5 text-foreground/85">· {p}</Text>
@@ -212,12 +325,6 @@ export default function AcademyScreen() {
             <Text className="text-center text-[10.5px] leading-4 text-foreground/40">{ACADEMY_FOOTER}</Text>
           </View>
         </ScrollView>
-      )}
-
-      {tab === "method" && (
-        <View className="pb-6 pt-5">
-          <Text className="px-8 text-center text-[10.5px] leading-4 text-foreground/40">{ACADEMY_FOOTER}</Text>
-        </View>
       )}
     </Screen>
   );

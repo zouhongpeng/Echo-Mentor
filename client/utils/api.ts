@@ -4,7 +4,7 @@
  */
 // Web 构建默认走同源相对路径（后端托管静态页时无需配置）；原生端默认本机 9091
 import { Platform } from "react-native";
-import * as FileSystem from "expo-file-system/legacy";
+import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
 
 const BASE_URL =
@@ -38,8 +38,8 @@ export async function downloadDocx(path: string, filename: string): Promise<void
     return;
   }
   // 原生端：带 PIN 头下载到缓存目录 → 系统分享
-  const fileUri = `${(FileSystem as any).cacheDirectory}${filename}`;
-  const dl = await (FileSystem as any).downloadAsync(`${BASE_URL}${path}`, fileUri, {
+  const fileUri = `${FileSystem.cacheDirectory}${filename}`;
+  const dl = await FileSystem.downloadAsync(`${BASE_URL}${path}`, fileUri, {
     headers: pinToken ? { "x-pin-token": pinToken } : {},
   });
   if (dl.status >= 400) throw new Error(`导出失败(${dl.status})`);
@@ -49,8 +49,8 @@ export async function downloadDocx(path: string, filename: string): Promise<void
 
 /** 原生端通用：把本地文本内容写成文件并调起系统分享 */
 export async function shareTextFile(content: string, filename: string): Promise<void> {
-  const fileUri = `${(FileSystem as any).cacheDirectory}${filename}`;
-  await (FileSystem as any).writeAsStringAsync(fileUri, content, { encoding: (FileSystem as any).EncodingType.UTF8 });
+  const fileUri = `${FileSystem.cacheDirectory}${filename}`;
+  await FileSystem.writeAsStringAsync(fileUri, content, { encoding: FileSystem.EncodingType.UTF8 });
   if (!(await Sharing.isAvailableAsync())) throw new Error("当前设备不支持系统分享");
   await Sharing.shareAsync(fileUri, { mimeType: mimeOf(filename), dialogTitle: "保存或分享文件", UTI: "public.data" });
 }
@@ -161,6 +161,14 @@ export const api = {
       "POST",
       "/api/v1/people/extract-profile",
       { text },
+    ),
+
+  // ===== 学院 =====
+  /** 各方法论在历史分析中的使用统计 */
+  academyUsage: () =>
+    request<{ counts: Record<string, number>; latest: Record<string, string>; total: number }>(
+      "GET",
+      "/api/v1/academy/usage",
     ),
 
   // ===== 视觉模型设置（截图识别） =====

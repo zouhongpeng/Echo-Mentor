@@ -750,6 +750,36 @@ app.get("/api/v1/export/docx", requirePin, async (req, res) => {
   }
 });
 
+// 学院：统计每套方法论在历史分析中的使用次数（供"每日一招"使用徽标）
+app.get("/api/v1/academy/usage", requirePin, async (req, res) => {
+  try {
+    const { data: rows } = await db
+      .from("analysis_records")
+      .select("result, created_at")
+      .order("created_at", { ascending: false })
+      .limit(500);
+    const counts: Record<string, number> = {};
+    const latest: Record<string, string> = {};
+    for (const r of rows ?? []) {
+      let result: any = r.result;
+      if (typeof result === "string") { try { result = JSON.parse(result); } catch { result = null; } }
+      const tags = new Set<string>();
+      (result?.suggestions || []).forEach((sg: any) => {
+        if (sg?.style) tags.add(String(sg.style));
+        if (sg?.theory_tag) tags.add(String(sg.theory_tag));
+      });
+      const date = String(r.created_at || "").slice(0, 10);
+      tags.forEach((t) => {
+        counts[t] = (counts[t] || 0) + 1;
+        if (date && !latest[t]) latest[t] = date;
+      });
+    }
+    ok(res, { counts, latest, total: (rows ?? []).length });
+  } catch (e: any) {
+    fail(res, e?.message || "统计失败", 500, 500);
+  }
+});
+
 // ============ 备份导入 ============
 app.post("/api/v1/import", requirePin, async (req, res) => {
   try {
