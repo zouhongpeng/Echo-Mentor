@@ -38,6 +38,29 @@ export default function SettingsScreen() {
   const [dsKey, setDsKeyState] = useState('');
   const [keyInput, setKeyInput] = useState('');
   const [keyVisible, setKeyVisible] = useState(false);
+
+  // 视觉模型（截图识别）状态
+  const [visionInfo, setVisionInfo] = useState<{ configured: boolean; source: string; model: string; key_masked: string } | null>(null);
+  const [visionKeyInput, setVisionKeyInput] = useState('');
+  const [visionSaving, setVisionSaving] = useState(false);
+  const loadVision = useCallback(async () => {
+    try { setVisionInfo(await api.visionSettings()); } catch { /* 静默 */ }
+  }, []);
+  React.useEffect(() => { loadVision(); }, [loadVision]);
+  const saveVision = async () => {
+    if (!visionKeyInput.trim() || visionSaving) return;
+    setVisionSaving(true);
+    try {
+      await api.saveVisionKey(visionKeyInput.trim());
+      setVisionKeyInput('');
+      await loadVision();
+      Alert.alert('已保存', '视觉模型配置已立即生效，去「帮我分析 → 截图识别」试试吧。');
+    } catch (e: any) {
+      Alert.alert('保存失败', e?.message);
+    } finally {
+      setVisionSaving(false);
+    }
+  };
   const [keyEditing, setKeyEditing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [importModal, setImportModal] = useState(false);
@@ -341,6 +364,36 @@ export default function SettingsScreen() {
               </TouchableOpacity>
             ))}
           </View>
+        </View>
+
+        {/* 视觉模型（截图识别） */}
+        <Text className="text-[15px] font-semibold text-foreground mt-2 mb-2">视觉模型 · 截图识别</Text>
+        <View className="bg-surface rounded-2xl p-4 mb-3 border border-border">
+          <Text className="text-[12px] text-muted mb-2 leading-4">
+            {visionInfo?.configured
+              ? `已配置（来源：${visionInfo.source}）· 模型：${visionInfo.model} · Key：${visionInfo.key_masked}`
+              : '未配置。推荐粘贴智谱 API Key（open.bigmodel.cn 免费申请，模型 glm-4.6v-flash），保存后立即生效。'}
+          </Text>
+          <TextInput
+            value={visionKeyInput}
+            onChangeText={setVisionKeyInput}
+            placeholder="粘贴视觉模型 API Key"
+            placeholderTextColor="#C9C9C9"
+            autoCapitalize="none"
+            autoCorrect={false}
+            className="bg-on-surface rounded-xl px-3.5 h-11 text-[13px] text-foreground mb-2"
+          />
+          <TouchableOpacity
+            onPress={saveVision}
+            disabled={visionSaving || !visionKeyInput.trim()}
+            className="h-10 rounded-xl bg-accent items-center justify-center self-start px-5"
+          >
+            {visionSaving ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Text className="text-white text-[13px] font-semibold">保存并生效</Text>
+            )}
+          </TouchableOpacity>
         </View>
 
         {/* 数据备份 */}

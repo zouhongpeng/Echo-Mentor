@@ -11,7 +11,7 @@ import path from "path";
 import { getSupabaseClient } from "./storage/database/supabase-client";
 import { memoryDb } from "./storage/database/memory-db";
 import { runAnalysis, prepareAnonymized, summerizeRecords, shouldModerate, extractProfileFacts, extractTiming, MODERATION_REPLY, type GrowthMode } from "./ai/analysis";
-import { recognizeImage, chat, extractJson } from "./ai/deepseek";
+import { recognizeImage, chat, extractJson, getVisionConfig } from "./ai/deepseek";
 import { buildReportDocx, buildAnalysisDocx } from "./docx";
 import { generateWeeklyReport } from "./ai/report";
 import { sha256, anonymize } from "./ai/anonymize";
@@ -682,6 +682,37 @@ speaker 只允许两种取值：用户本人发的消息填"我"，${personName 
     } else {
       fail(res, aiErrMsg(e), 502, 502);
     }
+  }
+});
+
+// 视觉模型配置：设置页查看/手动填 Key（保存到 vision.local.json，立即生效，重启不丢）
+app.get("/api/v1/settings/vision", requirePin, async (req, res) => {
+  const c = getVisionConfig();
+  ok(res, {
+    configured: !!c.apiKey,
+    source: c.source,
+    base_url: c.baseUrl,
+    model: c.model,
+    key_masked: c.apiKey ? c.apiKey.slice(0, 6) + "****" + c.apiKey.slice(-4) : "",
+  });
+});
+
+app.put("/api/v1/settings/vision", requirePin, async (req, res) => {
+  try {
+    const { api_key, base_url, model } = req.body ?? {};
+    if (!api_key || typeof api_key !== "string" || api_key.trim().length < 10) {
+      return fail(res, "请输入有效的 API Key（至少 10 个字符）", 400, 400);
+    }
+    const cfg = {
+      api_key: api_key.trim(),
+      base_url: (typeof base_url === "string" && base_url.trim()) || undefined,
+      model: (typeof model === "string" && model.trim()) || undefined,
+      updated_at: new Date().toISOString(),
+    };
+    fsSync.writeFileSync(path.resolve(process.cwd(), "vision.local.json"), JSON.stringify(cfg, null, 2));
+    ok(res, { saved: true, model: cfg.model || getVisionConfig().model });
+  } catch (e: any) {
+    fail(res, e?.message || "保存失败", 500, 500);
   }
 });
 

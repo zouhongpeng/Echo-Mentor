@@ -163,6 +163,19 @@ export const api = {
       { text },
     ),
 
+  // ===== 视觉模型设置（截图识别） =====
+  visionSettings: () =>
+    request<{ configured: boolean; source: string; base_url: string; model: string; key_masked: string }>(
+      "GET",
+      "/api/v1/settings/vision",
+    ),
+  saveVisionKey: (apiKey: string, baseUrl?: string, model?: string) =>
+    request<{ saved: boolean; model: string }>("PUT", "/api/v1/settings/vision", {
+      api_key: apiKey,
+      base_url: baseUrl,
+      model: model,
+    }),
+
   // ===== Reports =====
   reports: () => request<any[]>("GET", "/api/v1/reports"),
   generateReport: () =>

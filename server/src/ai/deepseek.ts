@@ -5,6 +5,8 @@
  * 仅后端使用，读取 DEEPSEEK_API_KEY / VISION_API_KEY，前端零密钥。
  */
 import crypto from "crypto";
+import fsSync from "fs";
+import path from "path";
 
 const BASE_URL = "https://api.deepseek.com/v1/chat/completions";
 const TIMEOUT_MS = 30000; // 30s 超时
@@ -93,23 +95,59 @@ export async function chat(
  * 视觉识别（截图转文字并分离说话人）；调用方需自行捕获异常做降级。
  *
  * ⚠️ DeepSeek 的 deepseek-chat 是纯文本模型，不支持图片输入（传 image_url 必报 400），
- * 因此截图识别走独立的"视觉模型"通道：
- * - VISION_API_KEY   ：视觉服务商密钥（推荐硅基流动 siliconflow.cn，可免费申请，国内直连）
- * - VISION_BASE_URL  ：默认 https://api.siliconflow.cn/v1/chat/completions
- * - VISION_MODEL     ：默认 Qwen/Qwen2.5-VL-32B-Instruct（免费额度可用）
+ * 因此截图识别走独立的"视觉模型"通道，配置优先级（高→低）：
+ * 1. 设置页保存的 vision.local.json（运行时手动配置）
+ * 2. 环境变量 VISION_API_KEY / VISION_BASE_URL / VISION_MODEL（keys.env 或平台注入）
+ * 3. 默认：智谱 GLM-4.6V-Flash（免费，open.bigmodel.cn 申请）
  */
-const VISION_BASE_URL =
-  process.env.VISION_BASE_URL ?? "https://api.siliconflow.cn/v1/chat/completions";
-const VISION_MODEL = process.env.VISION_MODEL ?? "Qwen/Qwen2.5-VL-32B-Instruct";
+const VISION_BASE_URL_DEFAULT = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
+const VISION_MODEL_DEFAULT = "glm-4.6v-flash";
 const VISION_TIMEOUT_MS = 60000; // 视觉模型较慢，60s 超时
 
+export interface VisionConfig {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  source: string;
+}
+
+/** 运行时视觉配置：设置页文件 > 环境变量 > 默认智谱免费模型 */
+export function getVisionConfig(): VisionConfig {
+  try {
+    const p = path.resolve(process.cwd(), "vision.local.json");
+    if (fsSync.existsSync(p)) {
+      const j = JSON.parse(fsSync.readFileSync(p, "utf8"));
+      if (j.api_key && String(j.api_key).length >= 10) {
+        return {
+          apiKey: String(j.api_key).trim(),
+          baseUrl: (j.base_url || process.env.VISION_BASE_URL || VISION_BASE_URL_DEFAULT).trim(),
+          model: (j.model || process.env.VISION_MODEL || VISION_MODEL_DEFAULT).trim(),
+          source: "设置页",
+        };
+      }
+    }
+  } catch { /* 配置文件损坏则忽略 */ }
+  if (process.env.VISION_API_KEY) {
+    return {
+      apiKey: process.env.VISION_API_KEY,
+      baseUrl: process.env.VISION_BASE_URL || VISION_BASE_URL_DEFAULT,
+      model: process.env.VISION_MODEL || VISION_MODEL_DEFAULT,
+      source: "环境变量",
+    };
+  }
+  return { apiKey: "", baseUrl: VISION_BASE_URL_DEFAULT, model: VISION_MODEL_DEFAULT, source: "未配置" };
+}
+
 export async function recognizeImage(system: string, user: string, imageDataUri: string): Promise<string> {
-  const key = process.env.VISION_API_KEY;
+  const cfg = getVisionConfig();
+  const key = cfg.apiKey;
   if (!key) {
     throw new Error(
-      "未配置视觉模型：服务端缺少 VISION_API_KEY 环境变量。推荐用智谱 GLM-4.6V-Flash（免费，open.bigmodel.cn 申请），也可用硅基流动等。"
+      "未配置视觉模型：可在本应用「设置 → 视觉模型」填入智谱 API Key（open.bigmodel.cn 免费申请），或在服务端配置 VISION_API_KEY 环境变量。"
     );
   }
+  const VISION_BASE_URL = cfg.baseUrl;
+  const VISION_MODEL = cfg.model;
   const isZhipu = /bigmodel/i.test(VISION_BASE_URL) || /glm/i.test(VISION_MODEL);
   // 智谱免费模型过载时自动降级（同一个 Key 都能用）：
   // 4.6V-Flash（质量最好）→ 4V-Flash（最快）→ 4.1V-Thinking-Flash（慢但常存活）
