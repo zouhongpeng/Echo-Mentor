@@ -1,4 +1,6 @@
-import "dotenv/config"; // 自动读取 server/.env（密钥等配置；平台注入的同名环境变量优先）
+// 密钥加载：优先读仓库内置的 server/keys.env（私有自用），再读常规 .env（平台注入的同名变量优先）
+import dotenv from "dotenv";
+for (const p of ["keys.env", "../keys.env", ".env", "../.env"]) dotenv.config({ path: p });
 
 // 私有仓库自用：支持以 Base64 存放 DeepSeek Key（避开 GitHub 密钥推送保护），启动时自动解码
 if (!process.env.DEEPSEEK_API_KEY && process.env.DEEPSEEK_API_KEY_B64) {
