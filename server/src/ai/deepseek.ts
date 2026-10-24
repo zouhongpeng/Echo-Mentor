@@ -107,44 +107,67 @@ export async function recognizeImage(system: string, user: string, imageDataUri:
   const key = process.env.VISION_API_KEY;
   if (!key) {
     throw new Error(
-      "未配置视觉模型：服务端缺少 VISION_API_KEY 环境变量。可在硅基流动（siliconflow.cn）免费申请一个 Key 并配置，即可使用截图识别。"
+      "未配置视觉模型：服务端缺少 VISION_API_KEY 环境变量。推荐用智谱 GLM-4.6V-Flash（免费，open.bigmodel.cn 申请），也可用硅基流动等。"
     );
   }
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), VISION_TIMEOUT_MS);
-  try {
-    const res = await fetch(VISION_BASE_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-        model: VISION_MODEL,
-        messages: [
-          { role: "system", content: system },
-          {
-            role: "user",
-            content: [
-              { type: "text", text: user },
-              { type: "image_url", image_url: { url: imageDataUri } },
-            ],
-          },
-        ],
-        temperature: 0.3,
-        max_tokens: 4096,
-        stream: false,
-      }),
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`视觉模型 ${res.status}: ${text.slice(0, 200)}`);
+  // 免费视觉模型（如 glm-4.6v-flash）并发限制严，429/5xx 自动退避重试
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), VISION_TIMEOUT_MS);
+    try {
+      const res = await fetch(VISION_BASE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+        body: JSON.stringify({
+          model: VISION_MODEL,
+          messages: [
+            { role: "system", content: system },
+            {
+              role: "user",
+              content: [
+                { type: "text", text: user },
+                { type: "image_url", image_url: { url: imageDataUri } },
+              ],
+            },
+          ],
+          temperature: 0.3,
+          max_tokens: 4096,
+          stream: false,
+        }),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        const err = new Error(`视觉模型 ${res.status}: ${text.slice(0, 200)}`);
+        // 429/5xx 且还有重试机会 → 退避后重试
+        if ((res.status === 429 || res.status >= 500) && attempt < 3) {
+          lastErr = err;
+          clearTimeout(timer);
+          await new Promise((r) => setTimeout(r, 5000 * (attempt + 1)));
+          continue;
+        }
+        throw err;
+      }
+      const data = await res.json();
+      const content = (data as any)?.choices?.[0]?.message?.content;
+      if (typeof content !== "string") throw new Error("视觉模型返回格式异常");
+      return content;
+    } catch (e: any) {
+      lastErr = e;
+      // 网络/超时错误且还有重试机会 → 退避重试
+      const retriable = !String(e?.message || "").includes("视觉模型") || /50[0234]|超时|abort/i.test(String(e?.message || ""));
+      if (retriable && attempt < 3) {
+        clearTimeout(timer);
+        await new Promise((r) => setTimeout(r, 5000 * (attempt + 1)));
+        continue;
+      }
+      throw e;
+    } finally {
+      clearTimeout(timer);
     }
-    const data = await res.json();
-    const content = (data as any)?.choices?.[0]?.message?.content;
-    if (typeof content !== "string") throw new Error("视觉模型返回格式异常");
-    return content;
-  } finally {
-    clearTimeout(timer);
   }
+  throw lastErr instanceof Error ? lastErr : new Error("视觉模型多次重试后仍失败");
 }
 
 /** 从 AI 文本中安全提取 JSON（容忍 markdown 代码块围栏） */
