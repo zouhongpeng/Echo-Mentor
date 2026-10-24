@@ -1,11 +1,4 @@
-// 密钥加载：优先读仓库内置的 server/keys.env（私有自用），再读常规 .env（平台注入的同名变量优先）
-import dotenv from "dotenv";
-for (const p of ["keys.env", "../keys.env", ".env", "../.env"]) dotenv.config({ path: p });
-
-// 私有仓库自用：支持以 Base64 存放 DeepSeek Key（避开 GitHub 密钥推送保护），启动时自动解码
-if (!process.env.DEEPSEEK_API_KEY && process.env.DEEPSEEK_API_KEY_B64) {
-  process.env.DEEPSEEK_API_KEY = Buffer.from(process.env.DEEPSEEK_API_KEY_B64, "base64").toString("utf8").trim();
-}
+import "./env"; // ← 必须第一个 import：加载 keys.env（详见 env.ts）
 import express from "express";
 import type { Request, Response } from "express";
 import cors from "cors";
@@ -685,7 +678,7 @@ speaker 只允许两种取值：用户本人发的消息填"我"，${personName 
     const raw = e?.message || "";
     // 免费视觉模型过载/限流的友好提示
     if (/429|1305|访问量过大|Too Many|524|50[0234]|401/i.test(raw) || /视觉模型/.test(raw)) {
-      fail(res, "免费视觉模型当前繁忙（智谱免费档限流），请等 1-2 分钟再试；也可以先手动粘贴聊天记录，不影响其他功能。", 503, 503);
+      fail(res, `免费视觉模型当前繁忙（智谱免费档限流），请等 1-2 分钟再试，或先手动粘贴聊天记录。〔详情: ${raw.slice(0, 140)}〕`, 503, 503);
     } else {
       fail(res, aiErrMsg(e), 502, 502);
     }

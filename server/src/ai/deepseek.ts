@@ -137,10 +137,11 @@ export async function recognizeImage(system: string, user: string, imageDataUri:
               ],
             },
           ],
-          temperature: 0.3,
-          max_tokens: 4096,
-          stream: false,
-        };
+        temperature: 0.3,
+        // glm-4v-flash 上下文仅 4K，max_tokens 上限 1024
+        max_tokens: /glm-4v-flash/i.test(model) ? 1024 : 4096,
+        stream: false,
+      };
         // 智谱 GLM-4.6V 默认开深度思考，OCR 类任务关掉可大幅提速
         if (/glm-4\.6v/i.test(model)) payload.thinking = { type: "disabled" };
         const res = await fetch(VISION_BASE_URL, {
@@ -151,6 +152,8 @@ export async function recognizeImage(system: string, user: string, imageDataUri:
         });
         if (!res.ok) {
           const text = await res.text();
+          // 诊断日志：打出实际使用的模型/Key 前缀/BaseURL 与响应
+          console.error(`[vision] model=${model} key=${String(key).slice(0, 10)}... url=${VISION_BASE_URL} status=${res.status} body=${text.slice(0, 120)}`);
           const err = new Error(`视觉模型 ${res.status}: ${text.slice(0, 200)}`);
           lastErr = err;
           if ((res.status === 429 || res.status === 401 || res.status >= 500) && attempt < 1) {
