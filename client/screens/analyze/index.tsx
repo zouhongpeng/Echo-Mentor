@@ -267,7 +267,7 @@ export default function AnalyzeScreen() {
       setShotMessages(data.messages);
       setShotStep('edit');
     } catch (e: any) {
-      Alert.alert('识别失败', '已为你降级为手动粘贴，请自行输入聊天记录', [
+      Alert.alert('识别失败', `${e?.message ?? '请稍后重试'}。也可以直接粘贴聊天记录，不影响分析。`, [
         { text: '知道了', onPress: () => { setShotImage(null); setPicking(false); setShotStep(null); } },
       ]);
       setPicking(false);

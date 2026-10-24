@@ -667,7 +667,8 @@ app.post("/api/v1/recognize", requirePin, upload.single("image"), async (req, re
     if (!req.file) return fail(res, "未上传图片", 400);
     const dataUri = `data:${req.file.mimetype || "image/png"};base64,${req.file.buffer.toString("base64")}`;
     const system = `你是聊天截图文字识别助手。请识别截图中的对话，并按说话人分离。对方称呼为"${personName || "对方"}"。要求输出 JSON：
-{"messages":[{"speaker":"我|对方","text":"说话内容"}]}
+{"messages":[{"speaker":"说话人","text":"说话内容"}]}
+speaker 只允许两种取值：用户本人发的消息填"我"，${personName || "对方"}发的消息填"${personName || "对方"}"。绝不能输出其他值。
 只识别对话气泡里的文字，忽略背景、时间、红点等无关元素。不要编造内容。`;
     // 视觉输入走 DeepSeek；若模型不支持则抛错 → 前端降级手动粘贴
     const content = await recognizeImage(system, "请识别并输出 JSON。", dataUri);
@@ -681,7 +682,13 @@ app.post("/api/v1/recognize", requirePin, upload.single("image"), async (req, re
     }
     ok(res, { messages });
   } catch (e: any) {
-    fail(res, aiErrMsg(e), 502, 502);
+    const raw = e?.message || "";
+    // 免费视觉模型过载/限流的友好提示
+    if (/429|1305|访问量过大|Too Many|524|50[0234]|401/i.test(raw) || /视觉模型/.test(raw)) {
+      fail(res, "免费视觉模型当前繁忙（智谱免费档限流），请等 1-2 分钟再试；也可以先手动粘贴聊天记录，不影响其他功能。", 503, 503);
+    } else {
+      fail(res, aiErrMsg(e), 502, 502);
+    }
   }
 });
 

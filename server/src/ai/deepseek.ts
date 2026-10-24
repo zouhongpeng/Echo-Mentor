@@ -144,8 +144,8 @@ export async function recognizeImage(system: string, user: string, imageDataUri:
       if (!res.ok) {
         const text = await res.text();
         const err = new Error(`视觉模型 ${res.status}: ${text.slice(0, 200)}`);
-        // 429/5xx 且还有重试机会 → 退避后重试
-        if ((res.status === 429 || res.status >= 500) && attempt < 3) {
+        // 429/5xx/偶发401（过载抽风）且还有重试机会 → 退避后重试
+        if ((res.status === 429 || res.status === 401 || res.status >= 500) && attempt < 3) {
           lastErr = err;
           clearTimeout(timer);
           await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
