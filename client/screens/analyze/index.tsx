@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, TextInput, ScrollView, Alert, ActivityIndicator, Platform, Modal, StyleSheet, Animated,
+  View, Text, TouchableOpacity, TextInput, ScrollView, Alert, ActivityIndicator, Platform, Modal, Animated,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -333,12 +333,7 @@ export default function AnalyzeScreen() {
 
   return (
     <Screen safeAreaEdges={['top', 'left', 'right', 'bottom']}>
-      {/* 私密感：柔和背景层（半透明暖雾） */}
-      <View style={StyleSheet.absoluteFill}>
-        <View className="absolute -top-24 -right-16 w-64 h-64 rounded-full bg-mist-soft" />
-        <View className="absolute top-40 -left-20 w-56 h-56 rounded-full bg-accent-soft" />
-        <View className="absolute bottom-0 right-0 w-40 h-40 rounded-full bg-mist-soft" />
-      </View>
+      {/* 背景统一为纸质暖白（由 Screen 的 --background token 控制） */}
 
       <View className="px-4 pt-2 pb-1 flex-row items-center justify-between">
         <TouchableOpacity onPress={() => { stopPolling(); router.back(); }} hitSlop={10} className="w-10 h-10 justify-center">
