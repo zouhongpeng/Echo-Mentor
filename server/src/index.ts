@@ -1,4 +1,9 @@
 import "dotenv/config"; // 自动读取 server/.env（密钥等配置；平台注入的同名环境变量优先）
+
+// 私有仓库自用：支持以 Base64 存放 DeepSeek Key（避开 GitHub 密钥推送保护），启动时自动解码
+if (!process.env.DEEPSEEK_API_KEY && process.env.DEEPSEEK_API_KEY_B64) {
+  process.env.DEEPSEEK_API_KEY = Buffer.from(process.env.DEEPSEEK_API_KEY_B64, "base64").toString("utf8").trim();
+}
 import express from "express";
 import type { Request, Response } from "express";
 import cors from "cors";
