@@ -1,3 +1,4 @@
+import "dotenv/config"; // 自动读取 server/.env（密钥等配置；平台注入的同名环境变量优先）
 import express from "express";
 import type { Request, Response } from "express";
 import cors from "cors";
