@@ -26,7 +26,7 @@ function clone<T>(v: T): T {
 class Builder {
   private op: "select" | "insert" | "update" | "delete" | undefined;
   private tableName: string;
-  private filters: { col: string; val: any }[] = [];
+  private filters: { col: string; val: any; op?: "gte" | "lte" }[] = [];
   private orderCol?: string;
   private orderAsc = true;
   private limitN?: number;
@@ -62,6 +62,14 @@ class Builder {
     this.filters.push({ col, val });
     return this;
   }
+  gte(col: string, val: any) {
+    this.filters.push({ col, val, op: "gte" });
+    return this;
+  }
+  lte(col: string, val: any) {
+    this.filters.push({ col, val, op: "lte" });
+    return this;
+  }
   order(col: string, opts?: { ascending?: boolean }) {
     this.orderCol = col;
     this.orderAsc = opts?.ascending !== false;
@@ -91,9 +99,18 @@ class Builder {
         rows.push(row);
         return row;
       });
-      return { data: this.returnRows ? clone(inserted) : null, error: null };
+      let data: any = this.returnRows ? clone(inserted) : null;
+      // 对齐 supabase-js：insert(...).select(...).single() 返回对象而非数组
+      if (this.returnRows && this.wantSingle) data = inserted.length ? clone(inserted[0]) : null;
+      else if (this.returnRows && this.wantMaybeSingle) data = inserted.length ? clone(inserted[0]) : null;
+      return { data, error: null };
     }
-    const match = (r: Row) => this.filters.every((f) => r[f.col] === f.val);
+    const match = (r: Row) =>
+      this.filters.every((f) => {
+        if (f.op === "gte") return String(r[f.col] ?? "") >= String(f.val);
+        if (f.op === "lte") return String(r[f.col] ?? "") <= String(f.val);
+        return r[f.col] === f.val;
+      });
     if (this.op === "update") {
       let n = 0;
       for (const r of rows) {
