@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, Modal, TextInput, ScrollView, FlatList, Alert, Platform, Animated, PanResponder,
+  View, Text, TouchableOpacity, Modal, TextInput, ScrollView, FlatList, Alert, Platform,
 } from 'react-native';
-import { PullHeader, FlashBanner } from '@/components/PullToRefresh';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
 import { useSafeRouter, useSafeSearchParams } from '@/hooks/useSafeRouter';
@@ -77,19 +76,6 @@ export default function HomeScreen() {
   const [query, setQuery] = useState('');
   const [reorderMode, setReorderMode] = useState(false);
   const [orderIds, setOrderIds] = useState<string[]>([]);
-  const pullY = useRef(new Animated.Value(0)).current;
-  const scrollY = useRef(0);
-  const [scrollOn, setScrollOn] = useState(true);
-  const pullReady = useRef(false);
-  const [flash, setFlash] = useState(0);
-  const spinLoop = useRef<any>(null);
-  const spinAngle = useRef(new Animated.Value(0)).current;
-  const [showPull, setShowPull] = useState(false);
-  useEffect(() => {
-    const id = pullY.addListener((v) => setShowPull(v.value > 0.5));
-    return () => pullY.removeListener(id);
-  }, []);
-
   const load = useCallback(async (showSpinner = false) => {
     if (!isUnlocked) return;
     if (showSpinner) setRefreshing(true);
@@ -127,38 +113,6 @@ export default function HomeScreen() {
     [ids[i], ids[j]] = [ids[j], ids[i]];
     persistOrder(ids);
   };
-
-  // 自定义阻尼下拉刷新
-  const damp = (raw: number) => 150 * (1 - 1 / (1 + Math.max(raw, 0) / 150));
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponderCapture: (_, g) => scrollY.current <= 1 && g.dy > 8 && Math.abs(g.dy) > Math.abs(g.dx),
-      onPanResponderGrant: () => setScrollOn(false),
-      onPanResponderMove: (_, g) => {
-        const damped = damp(g.dy);
-        pullY.setValue(damped);
-        pullReady.current = g.dy > 70;
-      },
-      onPanResponderRelease: () => {
-        setScrollOn(true);
-        if (pullReady.current) {
-          // 箭头变旋转加载图 1.2s → 弹回顶部 → 刷新并高亮
-          spinLoop.current = Animated.loop(Animated.timing(spinAngle, { toValue: 360, duration: 800, useNativeDriver: true }));
-          spinLoop.current.start();
-          Animated.spring(pullY, { toValue: 47, friction: 8, tension: 70, useNativeDriver: false }).start();
-          setTimeout(() => {
-            spinLoop.current?.stop();
-            Animated.spring(pullY, { toValue: 0, friction: 5, tension: 60, useNativeDriver: false, bounciness: 9 }).start();
-            (async () => { await load(true); })();
-            setFlash(Date.now());
-            pullReady.current = false;
-          }, 1200);
-        } else {
-          Animated.spring(pullY, { toValue: 0, friction: 6, tension: 65, useNativeDriver: false, bounciness: 8 }).start();
-        }
-      },
-    }),
-  ).current;
 
   const togglePin = async (id: string) => {
     const next = pinned.includes(id) ? pinned.filter((x) => x !== id) : [...pinned, id];
@@ -329,25 +283,10 @@ export default function HomeScreen() {
         </View>
       )}
 
-      <FlashBanner visible={!!flash} key={flash} text="已更新" />
-      <Animated.View style={{ flex: 1, overflow: 'hidden' }} {...panResponder.panHandlers}>
-        {showPull && (
-        <Animated.View style={{ height: pullY, alignItems: 'center', justifyContent: 'flex-end', overflow: 'hidden', paddingBottom: 8 }}>
-          <Animated.View style={{ transform: [{ rotate: spinAngle.interpolate({ inputRange: [0, 360], outputRange: ['0deg', '360deg'] }) }] }}>
-            <View style={{ width: 26, height: 26, borderRadius: 13, borderWidth: 3, borderColor: '#E5E5EA', borderTopColor: pullReady ? '#34C759' : '#E4572E' }} />
-          </Animated.View>
-          <Text className="text-[11px] mt-1" style={{ color: pullReady ? '#E4572E' : '#9C9CA3' }}>
-            {pullReady ? '松手刷新' : '下拉刷新'}
-          </Text>
-        </Animated.View>
-        )}
-        <Animated.View style={{ flex: 1, transform: [{ translateY: pullY }] }}>
+      <View style={{ flex: 1, overflow: 'hidden' }}>
       <FlatList
         data={visible}
         keyExtractor={(item) => item.id}
-        scrollEnabled={scrollOn}
-        onScroll={(e) => { scrollY.current = e.nativeEvent.contentOffset.y; }}
-        scrollEventThrottle={16}
         contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 40 }}
         ListEmptyComponent={
           query.trim() || filterRel ? (
@@ -436,8 +375,7 @@ export default function HomeScreen() {
           </View>
         )}
       />
-        </Animated.View>
-      </Animated.View>
+      </View>
 
       {/* Material 3 Extended FAB：页面唯一主操作 */}
       <TouchableOpacity
