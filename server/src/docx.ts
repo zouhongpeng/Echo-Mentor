@@ -127,3 +127,77 @@ export async function buildAnalysisDocx(input: {
   }
   return (await Packer.toBuffer(new Document({ sections: [{ children }] }))) as unknown as Buffer;
 }
+
+/** 全量档案 .docx：所有人物 + 时间线分析 + 周报，一次性导出为一份 Word */
+export async function buildFullArchiveDocx(input: {
+  exported_at: string;
+  people: any[];
+  analysesByPerson: Record<string, any[]>;
+  reports: any[];
+}): Promise<Buffer> {
+  const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString("zh-CN") : "");
+  const children: Paragraph[] = [];
+
+  // 封面
+  children.push(h1("Echo Mentor · 全部档案"));
+  children.push(meta(`导出时间：${new Date(input.exported_at).toLocaleString("zh-CN")} · ${input.people.length} 位人物 · ${Object.values(input.analysesByPerson).reduce((a, b) => a + b.length, 0)} 条分析 · ${input.reports.length} 份周报`));
+
+  const TEMP_COLOR: Record<string, string> = { 热: "#E4572E", 温: "#C9A227", 冷: "#5B7C99" };
+
+  for (const person of input.people) {
+    children.push(h2(`👤 ${person.name}${person.relationship ? `（${person.relationship}）` : ""}`));
+    if (person.background) children.push(p(`背景：${person.background}`));
+    const dates = person.dates || [];
+    if (dates.length) children.push(p(`重要日期：${dates.map((d: any) => `${d.name} ${d.month_day}`).join(" · ")}`));
+
+    const analyses = input.analysesByPerson[person.id] || [];
+    if (!analyses.length) {
+      children.push(p("暂无分析记录", { color: "86868B", size: 20 }));
+      continue;
+    }
+    for (const a of analyses) {
+      const status = a.status;
+      const title = `🕒 ${fmtDate(a.created_at)}${a.temp_label ? ` · 温度：${a.temp_label}` : ""}${status === "failed" ? " · 分析失败" : ""}`;
+      children.push(new Paragraph({
+        spacing: { before: 200, after: 80 },
+        children: [new TextRun({ text: title, bold: true, size: 24, color: TEMP_COLOR[a.temp_label] || "3F3A36", font: FONT })],
+      }));
+      if (a.thought_input) children.push(p(`我的想法：${a.thought_input}`));
+      const r = a.result || {};
+      if (r.thoughts?.length) {
+        children.push(p("对面在想什么", { bold: true, size: 22 }));
+        r.thoughts.forEach((t: any) => children.push(bullet(`${t.point}${t.evidence ? `（${t.evidence}）` : ""}`)));
+      }
+      if (r.suggestions?.length) {
+        children.push(p("建议回复", { bold: true, size: 22 }));
+        r.suggestions.forEach((s: any) => children.push(bullet(`〔${s.style || "建议"}〕${s.text}`)));
+      }
+      if (r.notes?.length) {
+        children.push(p("注意事项", { bold: true, size: 22 }));
+        r.notes.forEach((nt: string) => children.push(bullet(nt)));
+      }
+      if (r.outcome?.effect) {
+        children.push(p(`效果复盘：${r.outcome.effect}${r.outcome.reason ? ` — ${r.outcome.reason}` : ""}${r.outcome.lesson ? `（💡 ${r.outcome.lesson}）` : ""}`, { size: 22 }));
+      }
+      if (status === "gen") children.push(p("（分析生成中）", { color: "86868B", size: 20 }));
+    }
+  }
+
+  // 周报
+  if (input.reports.length) {
+    children.push(h2("📊 沟通周报汇总"));
+    for (const rp of input.reports) {
+      const c = rp.content || {};
+      children.push(new Paragraph({
+        spacing: { before: 200, after: 80 },
+        children: [new TextRun({ text: `📄 ${fmtDate(rp.created_at)}`, bold: true, size: 24, color: "3F3A36", font: FONT })],
+      }));
+      if (c.summary) children.push(p(c.summary));
+      if (c.key_events?.length) c.key_events.forEach((x: string) => children.push(bullet(x)));
+      if (c.improvements?.length) c.improvements.forEach((x: string) => children.push(bullet(x)));
+      if (c.progress?.length) c.progress.forEach((x: string) => children.push(bullet(`进步：${x}`)));
+    }
+  }
+
+  return (await Packer.toBuffer(new Document({ sections: [{ children }] }))) as unknown as Buffer;
+}

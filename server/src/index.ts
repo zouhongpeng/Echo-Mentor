@@ -12,7 +12,7 @@ import { getSupabaseClient } from "./storage/database/supabase-client";
 import { memoryDb } from "./storage/database/memory-db";
 import { runAnalysis, prepareAnonymized, summerizeRecords, shouldModerate, extractProfileFacts, extractTiming, MODERATION_REPLY, type GrowthMode } from "./ai/analysis";
 import { recognizeImage, chat, extractJson, getVisionConfig } from "./ai/deepseek";
-import { buildReportDocx, buildAnalysisDocx } from "./docx";
+import { buildReportDocx, buildAnalysisDocx, buildFullArchiveDocx } from "./docx";
 import { generateWeeklyReport } from "./ai/report";
 import { sha256, anonymize } from "./ai/anonymize";
 
@@ -713,6 +713,40 @@ app.put("/api/v1/settings/vision", requirePin, async (req, res) => {
     ok(res, { saved: true, model: cfg.model || getVisionConfig().model });
   } catch (e: any) {
     fail(res, e?.message || "保存失败", 500, 500);
+  }
+});
+
+// 全量档案 Word 导出：所有人物 + 时间线 + 周报 → 一份 .docx（人话可读版）
+app.get("/api/v1/export/docx", requirePin, async (req, res) => {
+  try {
+    const { data: people } = await db.from("people").select("*").order("created_at", { ascending: false });
+    const list = people ?? [];
+    const analysesByPerson: Record<string, any[]> = {};
+    for (const p of list) {
+      const { data: rows } = await db
+        .from("analysis_records")
+        .select("*")
+        .eq("person_id", p.id)
+        .order("created_at", { ascending: true });
+      analysesByPerson[p.id] = rows ?? [];
+    }
+    let reports: any[] = [];
+    try {
+      const { data: rp } = await db.from("weekly_reports").select("*").order("created_at", { ascending: false });
+      reports = rp ?? [];
+    } catch { /* ignore */ }
+    const buf = await buildFullArchiveDocx({
+      exported_at: new Date().toISOString(),
+      people: list,
+      analysesByPerson,
+      reports,
+    });
+    const filename = `Echo-Mentor-全部档案-${new Date().toISOString().slice(0, 10)}.docx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
+    res.send(Buffer.from(buf));
+  } catch (e: any) {
+    fail(res, e?.message || "导出失败", 500, 500);
   }
 });
 
