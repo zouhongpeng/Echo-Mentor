@@ -108,7 +108,7 @@ export default function ReportScreen() {
   return (
     <Screen>
       <ScrollView
-        className="flex-1 bg-[#FAFAFA] dark:bg-gray-900"
+        className="flex-1"
         contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 40 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} />}
       >

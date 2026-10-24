@@ -201,7 +201,7 @@ export default function RehearseScreen() {
                 onChangeText={setInput}
                 placeholder={`说给「${personName}」听…`}
                 placeholderTextColor="#9C9CA3"
-                className="flex-1 bg-[#F2F2F7] rounded-full px-4 h-11 text-[15px] text-foreground"
+                className="flex-1 bg-on-surface rounded-full px-4 h-11 text-[15px] text-foreground"
                 onSubmitEditing={send}
               />
               <TouchableOpacity onPress={send} disabled={loading} className="w-11 h-11 rounded-full bg-accent items-center justify-center">
