@@ -110,65 +110,70 @@ export async function recognizeImage(system: string, user: string, imageDataUri:
       "未配置视觉模型：服务端缺少 VISION_API_KEY 环境变量。推荐用智谱 GLM-4.6V-Flash（免费，open.bigmodel.cn 申请），也可用硅基流动等。"
     );
   }
-  // 免费视觉模型（如 glm-4.6v-flash）并发限制严，429/5xx 自动退避重试
-  const isZhipu = /glm/i.test(VISION_MODEL);
+  const isZhipu = /bigmodel/i.test(VISION_BASE_URL) || /glm/i.test(VISION_MODEL);
+  // 智谱免费模型过载时自动降级到其他免费模型（同一个 Key 都能用）
+  const candidates = isZhipu
+    ? [VISION_MODEL, "glm-4.1v-thinking-flash", "glm-4v-flash"].filter(
+        (m, i, arr) => m && arr.indexOf(m) === i,
+      )
+    : [VISION_MODEL];
+
   let lastErr: unknown;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), VISION_TIMEOUT_MS);
-    try {
-      const payload: Record<string, unknown> = {
-        model: VISION_MODEL,
-        messages: [
-          { role: "system", content: system },
-          {
-            role: "user",
-            content: [
-              { type: "text", text: user },
-              { type: "image_url", image_url: { url: imageDataUri } },
-            ],
-          },
-        ],
-        temperature: 0.3,
-        max_tokens: 4096,
-        stream: false,
-      };
-      // 智谱 GLM-4.6V 默认开深度思考，OCR 类任务关掉可大幅提速
-      if (isZhipu) payload.thinking = { type: "disabled" };
-      const res = await fetch(VISION_BASE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        const err = new Error(`视觉模型 ${res.status}: ${text.slice(0, 200)}`);
-        // 429/5xx/偶发401（过载抽风）且还有重试机会 → 退避后重试
-        if ((res.status === 429 || res.status === 401 || res.status >= 500) && attempt < 3) {
+  for (const model of candidates) {
+    // 每个模型最多尝试 2 次（429/5xx/偶发401 退避重试）
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), VISION_TIMEOUT_MS);
+      try {
+        const payload: Record<string, unknown> = {
+          model,
+          messages: [
+            { role: "system", content: system },
+            {
+              role: "user",
+              content: [
+                { type: "text", text: user },
+                { type: "image_url", image_url: { url: imageDataUri } },
+              ],
+            },
+          ],
+          temperature: 0.3,
+          max_tokens: 4096,
+          stream: false,
+        };
+        // 智谱 GLM-4.6V 默认开深度思考，OCR 类任务关掉可大幅提速
+        if (/glm-4\.6v/i.test(model)) payload.thinking = { type: "disabled" };
+        const res = await fetch(VISION_BASE_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          const err = new Error(`视觉模型 ${res.status}: ${text.slice(0, 200)}`);
           lastErr = err;
-          clearTimeout(timer);
-          await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
-          continue;
+          if ((res.status === 429 || res.status === 401 || res.status >= 500) && attempt < 1) {
+            clearTimeout(timer);
+            await new Promise((r) => setTimeout(r, 2000));
+            continue;
+          }
+          break; // 该模型放弃，换下一个
         }
-        throw err;
-      }
-      const data = await res.json();
-      const content = (data as any)?.choices?.[0]?.message?.content;
-      if (typeof content !== "string") throw new Error("视觉模型返回格式异常");
-      return content;
-    } catch (e: any) {
-      lastErr = e;
-      // 网络/超时错误且还有重试机会 → 退避重试
-      const retriable = !String(e?.message || "").includes("视觉模型") || /50[0234]|超时|abort/i.test(String(e?.message || ""));
-      if (retriable && attempt < 3) {
+        const data = await res.json();
+        const content = (data as any)?.choices?.[0]?.message?.content;
+        if (typeof content !== "string") {
+          lastErr = new Error("视觉模型返回格式异常");
+          break;
+        }
+        return content;
+      } catch (e: any) {
+        lastErr = e;
+        // 超时/网络错误 → 换下一个模型（不再原地重试）
+        break;
+      } finally {
         clearTimeout(timer);
-        await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
-        continue;
       }
-      throw e;
-    } finally {
-      clearTimeout(timer);
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error("视觉模型多次重试后仍失败");
