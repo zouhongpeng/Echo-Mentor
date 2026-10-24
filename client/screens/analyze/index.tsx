@@ -7,6 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import MeAvatar from '@/components/MeAvatar';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { useSafeRouter, useSafeSearchParams } from '@/hooks/useSafeRouter';
 import { Screen } from '@/components/Screen';
 import { api } from '@/utils/api';
@@ -238,31 +239,18 @@ export default function AnalyzeScreen() {
 
   // 上传前压缩：手机截图普遍 2-5MB，缩到宽 1000px 能把识别速度提升数倍
   const resizeForUpload = async (uri: string): Promise<string> => {
-    if (Platform.OS === 'web') {
-      try {
-        return await new Promise<string>((resolve) => {
-          const img = new Image();
-          img.onload = () => {
-            const maxDim = 1000;
-            const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
-            if (scale >= 1) return resolve(uri);
-            const canvas = document.createElement('canvas');
-            canvas.width = Math.round(img.width * scale);
-            canvas.height = Math.round(img.height * scale);
-            canvas.getContext('2d')?.drawImage(img, 0, 0, canvas.width, canvas.height);
-            resolve(canvas.toDataURL('image/jpeg', 0.85));
-          };
-          img.onerror = () => resolve(uri);
-          img.src = uri;
-        });
-      } catch { return uri; }
-    }
     // 原生端：expo-image-manipulator 压缩
     try {
-      const IM = await import('expo-image-manipulator');
-      const res = await (IM as any).manipulateAsync(uri, [{ resize: { width: 1000 } }], { compress: 0.85, format: (IM as any).SaveFormat.JPEG });
+      const res = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: 1000 } }],
+        { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
+      );
       return res.uri;
-    } catch { return uri; }
+    } catch {
+      // Web 端 expo-image-manipulator 不支持时直接返回原图（识别仍可用）
+      return uri;
+    }
   };
 
   // 选择截图

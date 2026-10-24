@@ -34,7 +34,7 @@ function meta(text: string) {
 export async function buildReportDocx(report: {
   created_at?: string;
   content?: { summary?: string; key_events?: string[]; habits?: string[]; otherTrend?: string; improvements?: string[]; progress?: string[] };
-}): Buffer {
+}): Promise<Buffer<ArrayBufferLike>> {
   const c = report.content || {};
   const children: Paragraph[] = [
     h1("沟通周报"),
@@ -76,7 +76,7 @@ export async function buildAnalysisDocx(input: {
     checklist?: { item: string; status: string; note?: string }[];
     outcome?: { effect?: string; reason?: string; lesson?: string };
   };
-}): Buffer {
+}): Promise<Buffer<ArrayBufferLike>> {
   const r = input.result || {};
   const children: Paragraph[] = [
     h1(`沟通分析报告 · ${input.personName}`),
