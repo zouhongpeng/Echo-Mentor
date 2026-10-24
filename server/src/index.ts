@@ -12,6 +12,7 @@ import { getSupabaseClient } from "./storage/database/supabase-client";
 import { memoryDb } from "./storage/database/memory-db";
 import { runAnalysis, prepareAnonymized, summerizeRecords, shouldModerate, extractProfileFacts, extractTiming, MODERATION_REPLY, type GrowthMode } from "./ai/analysis";
 import { recognizeImage, chat, extractJson, getVisionConfig } from "./ai/deepseek";
+import { buildStageSection } from "./ai/methodologies";
 import { buildReportDocx, buildAnalysisDocx, buildFullArchiveDocx } from "./docx";
 import { generateWeeklyReport } from "./ai/report";
 import { sha256, anonymize } from "./ai/anonymize";
@@ -779,6 +780,92 @@ app.get("/api/v1/academy/usage", requirePin, async (req, res) => {
     ok(res, { counts, latest, total: (rows ?? []).length });
   } catch (e: any) {
     fail(res, e?.message || "统计失败", 500, 500);
+  }
+});
+
+
+/* ============ 语音大脑（硬件设备用）：读人物档案+阶段打法 → 口语化短建议 ============ */
+
+async function voiceBrain(message: string, personId?: string, stage?: string): Promise<{ reply: string; person: string | null; stage_used: string | null }> {
+  // 选人物：指定优先，否则最近创建的一位
+  let person: any = null;
+  if (personId) {
+    const { data } = await db.from("people").select("*").eq("id", personId).maybeSingle();
+    person = data;
+  } else {
+    const { data: list } = await db.from("people").select("*").order("created_at", { ascending: false }).limit(1);
+    person = list?.[0] ?? null;
+  }
+  const personName = person?.name ?? "";
+  let recent = "";
+  let stageUsed: string | null = stage || null;
+  if (person) {
+    const { data: rows } = await db
+      .from("analysis_records")
+      .select("result, temp_label, created_at")
+      .eq("person_id", person.id)
+      .order("created_at", { ascending: false })
+      .limit(3);
+    recent = (rows ?? [])
+      .map((r: any, i: number) => {
+        const tip = r.result?.stage_tip;
+        const pt = r.result?.thoughts?.[0]?.point;
+        return `${i + 1}. ${String(r.created_at || "").slice(5, 10)} 温度${r.temp_label || "?"}：${tip?.next || pt || "无记录"}`;
+      })
+      .join("\n");
+    if (!stageUsed) {
+      for (const r of rows ?? []) {
+        const sn = r.result?.stage_tip?.stage_now;
+        if (sn) { stageUsed = sn; break; }
+      }
+    }
+  }
+  const system = [
+    "你是用户随身的高中生沟通军师，通过一个语音硬件设备对话。用户可能正处于情绪低落或无助的时刻。",
+    "回答规则：",
+    "1. 口语化，不超过 80 个字，像懂行的朋友当面说的一句话，不是文章。",
+    "2. 结构：先接住情绪（半句），再给一个马上能做的具体动作（不写「多沟通」「保持冷静」这种空话）。",
+    "3. 如果给出了人物档案和阶段信息，建议必须符合该阶段的节奏（该慢慢来就别让用户冲）。",
+    "4. 不说「作为AI」，不喊口号，不堆感叹号，不确定的事就承认不确定。",
+    "5. 用户的话如果只是情绪表达（如「好烦」），先共情再轻给一个动作；如果是具体提问，直接给动作。",
+  ].join("\n");
+  const userContent = [
+    person ? `【当前关注的人物】${personName}${person.relationship ? `（${person.relationship}）` : ""}` : "【当前关注的人物】未指定",
+    person?.background ? `【档案备注】${person.background}` : "",
+    stageUsed ? buildStageSection(stageUsed) : "",
+    recent ? `【最近的分析摘要】\n${recent}` : "",
+    "",
+    `【用户刚说的话】${message}`,
+  ].filter(Boolean).join("\n");
+  const result = await chat(system, userContent, 0.7);
+  return { reply: result.content.trim(), person: personName || null, stage_used: stageUsed };
+}
+
+app.post("/api/v1/voice", requirePin, async (req, res) => {
+  try {
+    const { message, person_id, stage } = req.body ?? {};
+    if (!message || typeof message !== "string" || !message.trim()) return fail(res, "缺少 message", 400, 400);
+    const out = await voiceBrain(String(message).slice(0, 500), person_id, stage);
+    ok(res, out);
+  } catch (e: any) {
+    fail(res, e?.message || "语音大脑暂不可用", 502, 502);
+  }
+});
+
+// OpenAI 兼容包装：小智 AI 自建服务器可直接把这个地址配成"自定义 LLM"
+app.post("/api/v1/voice/openai", async (req, res) => {
+  try {
+    const msgs = Array.isArray(req.body?.messages) ? req.body.messages : [];
+    const last = [...msgs].reverse().find((m: any) => m.role === "user");
+    if (!last?.content) return fail(res, "缺少 messages", 400, 400);
+    const out = await voiceBrain(String(last.content).slice(0, 500));
+    res.json({
+      id: "echo-voice",
+      object: "chat.completion",
+      choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: out.reply } }],
+    });
+  } catch (e: any) {
+    fail(res, e?.message || "语音大脑暂不可用", 502, 502);
   }
 });
 
