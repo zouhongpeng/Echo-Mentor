@@ -111,30 +111,34 @@ export async function recognizeImage(system: string, user: string, imageDataUri:
     );
   }
   // 免费视觉模型（如 glm-4.6v-flash）并发限制严，429/5xx 自动退避重试
+  const isZhipu = /glm/i.test(VISION_MODEL);
   let lastErr: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), VISION_TIMEOUT_MS);
     try {
+      const payload: Record<string, unknown> = {
+        model: VISION_MODEL,
+        messages: [
+          { role: "system", content: system },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: user },
+              { type: "image_url", image_url: { url: imageDataUri } },
+            ],
+          },
+        ],
+        temperature: 0.3,
+        max_tokens: 4096,
+        stream: false,
+      };
+      // 智谱 GLM-4.6V 默认开深度思考，OCR 类任务关掉可大幅提速
+      if (isZhipu) payload.thinking = { type: "disabled" };
       const res = await fetch(VISION_BASE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-        body: JSON.stringify({
-          model: VISION_MODEL,
-          messages: [
-            { role: "system", content: system },
-            {
-              role: "user",
-              content: [
-                { type: "text", text: user },
-                { type: "image_url", image_url: { url: imageDataUri } },
-              ],
-            },
-          ],
-          temperature: 0.3,
-          max_tokens: 4096,
-          stream: false,
-        }),
+        body: JSON.stringify(payload),
         signal: controller.signal,
       });
       if (!res.ok) {
@@ -144,7 +148,7 @@ export async function recognizeImage(system: string, user: string, imageDataUri:
         if ((res.status === 429 || res.status >= 500) && attempt < 3) {
           lastErr = err;
           clearTimeout(timer);
-          await new Promise((r) => setTimeout(r, 5000 * (attempt + 1)));
+          await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
           continue;
         }
         throw err;
@@ -159,7 +163,7 @@ export async function recognizeImage(system: string, user: string, imageDataUri:
       const retriable = !String(e?.message || "").includes("视觉模型") || /50[0234]|超时|abort/i.test(String(e?.message || ""));
       if (retriable && attempt < 3) {
         clearTimeout(timer);
-        await new Promise((r) => setTimeout(r, 5000 * (attempt + 1)));
+        await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
         continue;
       }
       throw e;
