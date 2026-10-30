@@ -33,6 +33,22 @@ jobs:
         working-directory: client
         run: npx expo prebuild -p android --no-install
 
+      - name: Patch root build.gradle (compileSdk fallback for pnpm layouts)
+        working-directory: client/android
+        run: |
+          cat >> build.gradle <<'EOF'
+
+          // CI fallback: pnpm 布局下个别 RN 库的 compileSdk 可能未生效，统一兜底
+          subprojects { sp ->
+            afterEvaluate {
+              if (sp.plugins.hasPlugin("com.android.library")) {
+                sp.android.compileSdkVersion = 36
+              }
+            }
+          }
+          EOF
+          tail -15 build.gradle
+
       - name: Build debug APK
         working-directory: client/android
         run: |
