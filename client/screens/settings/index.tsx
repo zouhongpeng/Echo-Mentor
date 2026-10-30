@@ -39,6 +39,15 @@ export default function SettingsScreen() {
   const [visionModelInput, setVisionModelInput] = useState('');
   const [visionSaving, setVisionSaving] = useState(false);
   const loadVision = useCallback(async () => {
+    // 优先展示本机直连配置（App 直连智谱，不依赖服务器）
+    const { getLocalVision } = await import('@/utils/vision');
+    const local = await getLocalVision();
+    if (local) {
+      setVisionInfo({ configured: true, source: '本机直连', model: local.model, key_masked: maskKey(local.apiKey) });
+      setVisionUrlInput((s) => s || '');
+      setVisionModelInput((s) => s || '');
+      return;
+    }
     try {
       const v = await api.visionSettings();
       setVisionInfo(v);
@@ -51,10 +60,14 @@ export default function SettingsScreen() {
     if (!visionKeyInput.trim() || visionSaving) return;
     setVisionSaving(true);
     try {
-      await api.saveVisionKey(visionKeyInput.trim(), visionUrlInput.trim() || undefined, visionModelInput.trim() || undefined);
+      // 先存本机（App 直连智谱，服务器不可达也能用）
+      const { saveLocalVision } = await import('@/utils/vision');
+      await saveLocalVision(visionKeyInput.trim(), visionUrlInput.trim() || undefined, visionModelInput.trim() || undefined);
+      // 再尝试同步到服务器（失败不影响）
+      await api.saveVisionKey(visionKeyInput.trim(), visionUrlInput.trim() || undefined, visionModelInput.trim() || undefined).catch(() => {});
       setVisionKeyInput('');
       await loadVision();
-      Alert.alert('已保存', '视觉模型配置已立即生效，去「帮我分析 → 截图识别」试试吧。');
+      Alert.alert('已保存', '视觉模型配置已生效（本机直连，不依赖服务器），去「帮我分析 → 截图识别」试试吧。');
     } catch (e: any) {
       Alert.alert('保存失败', e?.message);
     } finally {

@@ -309,21 +309,53 @@ export default function AnalyzeScreen() {
   };
 
   const runRecognize = async (file: any) => {
+    // 优先本机直连视觉模型（不依赖后端）；未配置 Key 或直连失败 → 退回服务器识别
+    const { getLocalVision, recognizeDirect } = await import('@/utils/vision');
+    const local = await getLocalVision();
+    if (local) {
+      try {
+        const messages = await recognizeDirect(file.uri, personName);
+        setShotMessages(messages);
+        setShotStep('edit');
+        return;
+      } catch (e: any) {
+        if (e?.message !== 'NO_LOCAL_KEY') {
+          // 直连失败（网络/模型问题），再试服务器链路
+          try {
+            const data = await serverRecognize(file);
+            setShotMessages(data);
+            setShotStep('edit');
+            return;
+          } catch { /* 两路都失败，走统一报错 */ }
+          Alert.alert('识别失败', `${e?.message ?? '请稍后重试'}。也可以直接粘贴聊天记录，不影响分析。`, [
+            { text: '知道了', onPress: () => { setShotImage(null); setPicking(false); setShotStep(null); } },
+          ]);
+          setPicking(false);
+          return;
+        }
+      }
+    }
     try {
-      const fd = new FormData();
-      const f = await createFormDataFile(file.uri, file.name, file.mime);
-      (fd as any).append('image', f as any);
-      (fd as any).append('person_name', personName);
-      const data = await api.recognize(fd);
-      if (!data.messages || !data.messages.length) throw new Error('未识别出对话');
-      setShotMessages(data.messages);
+      const data = await serverRecognize(file);
+      setShotMessages(data);
       setShotStep('edit');
     } catch (e: any) {
-      Alert.alert('识别失败', `${e?.message ?? '请稍后重试'}。也可以直接粘贴聊天记录，不影响分析。`, [
+      const hint = local ? '' : '（提示：设置页「视觉模型」填入智谱 Key 可手机直连识别，不依赖服务器）';
+      Alert.alert('识别失败', `${e?.message ?? '请稍后重试'}${hint}。也可以直接粘贴聊天记录，不影响分析。`, [
         { text: '知道了', onPress: () => { setShotImage(null); setPicking(false); setShotStep(null); } },
       ]);
       setPicking(false);
     }
+  };
+
+  const serverRecognize = async (file: any) => {
+    const fd = new FormData();
+    const f = await createFormDataFile(file.uri, file.name, file.mime);
+    (fd as any).append('image', f as any);
+    (fd as any).append('person_name', personName);
+    const data = await api.recognize(fd);
+    if (!data.messages || !data.messages.length) throw new Error('未识别出对话');
+    return data.messages;
   };
 
   // AI 分句：把整段粘贴的原始聊天记录拆成逐句+说话人，回填「逐句确认」模式
