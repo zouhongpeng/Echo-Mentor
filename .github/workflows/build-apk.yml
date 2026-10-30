@@ -1,8 +1,7 @@
 name: Build APK
 
+# 只在手动触发时打包（日常只推代码，APK 由用户自行在扣子 / 本地构建）
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
