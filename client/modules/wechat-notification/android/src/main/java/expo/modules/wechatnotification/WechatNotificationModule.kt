@@ -45,6 +45,8 @@ class WechatNotificationModule : Module() {
     val cn = ComponentName(ctx, WechatNotificationService::class.java)
     val flat = Settings.Secure.getString(ctx.contentResolver, "enabled_notification_listeners")
     if (TextUtils.isEmpty(flat)) return false
-    return flat!!.contains(cn.flattenToString()) || flat.contains(cn.flattenAsString())
+    // 不同 Android 版本写入的格式不同（flattenToString / flattenToShortString），两种都比对
+    val possible = cn.flattenToString()
+    return flat!!.contains(possible) || flat.contains(cn.flattenToShortString())
   }
 }
