@@ -9,6 +9,8 @@ import { Screen } from '@/components/Screen';
 import { api } from '@/utils/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { evaluateDateReminders, type UpcomingDate } from '@/utils/reminder';
+import UsageCard from '@/components/UsageCard';
+import { setAddPersonHandler } from '@/utils/addPersonBus';
 import dayjs from 'dayjs';
 
 type Person = any;
@@ -156,6 +158,17 @@ export default function HomeScreen() {
     return `最近互动 ${dayjs(t).format('M月D日 HH:mm')}`;
   };
 
+  // 底栏中间「＋」按钮 → 打开建档 Modal
+  useEffect(() => {
+    setAddPersonHandler(() => {
+      setEditing(null);
+      setForm(EMPTY_FORM);
+      setAiText('');
+      setShowModal(true);
+    });
+    return () => setAddPersonHandler(null);
+  }, []);
+
   const openAdd = () => {
     setEditing(null);
     setForm(EMPTY_FORM);
@@ -288,6 +301,7 @@ export default function HomeScreen() {
         data={visible}
         keyExtractor={(item) => item.id}
         contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 40 }}
+        ListFooterComponent={<View style={{ marginHorizontal: -20 }}><UsageCard /></View>}
         ListEmptyComponent={
           query.trim() || filterRel ? (
             <View className="items-center pt-14 px-8">
@@ -376,17 +390,6 @@ export default function HomeScreen() {
         )}
       />
       </View>
-
-      {/* Material 3 Extended FAB：页面唯一主操作 */}
-      <TouchableOpacity
-        onPress={openAdd}
-        activeOpacity={0.85}
-        className="absolute right-5 bottom-[104px] h-14 px-5 rounded-2xl bg-accent flex-row items-center"
-        style={{ shadowColor: '#E4572E', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.35, shadowRadius: 10, elevation: 6 }}
-      >
-        <Text className="text-white text-[24px] font-light mr-1.5" style={{ marginTop: -2 }}>＋</Text>
-        <Text className="text-white font-semibold text-[15px]">新增人物</Text>
-      </TouchableOpacity>
 
       {/* 档案 Modal */}
       <Modal visible={showModal} transparent animationType="slide" onRequestClose={() => setShowModal(false)}>

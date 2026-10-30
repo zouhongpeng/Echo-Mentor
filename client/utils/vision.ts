@@ -7,6 +7,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system/legacy";
 import { getDsKey } from "./deepseek";
+import { recordUsage } from "./usage";
 
 const K_KEY = "reply-assistant.vision-key";
 const K_BASE = "reply-assistant.vision-base";
@@ -121,6 +122,10 @@ speaker 只允许两种取值：用户本人发的消息填"我"，${who}发的�
           continue; // 换下一个模型/通道
         }
         const data = await res.json();
+        // 记账（仅 DeepSeek 通道；智谱按 token 计费规则不同，不做估算）
+        if (dsKey && /deepseek/i.test(ch.baseUrl)) {
+          void recordUsage(model, data?.usage?.prompt_tokens, data?.usage?.completion_tokens, data?.usage?.prompt_cache_hit_tokens);
+        }
         const content = data?.choices?.[0]?.message?.content;
         if (typeof content !== "string") {
           lastErr = new Error("视觉模型返回格式异常");

@@ -4,6 +4,7 @@ import { usePathname, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FontAwesome6 } from '@expo/vector-icons';
 import { useCSSVariable } from 'uniwind';
+import { requestAddPerson } from '@/utils/addPersonBus';
 
 /**
  * Apple「水滴胶囊」底部导航：
@@ -20,6 +21,8 @@ const TABS = [
 ];
 
 const PILL = 58;
+const SLOTS = TABS.length + 1; // 4 个标签 + 中间「新增人物」按钮
+const CENTER_SLOT = 2;
 
 export default function FlowTabBar() {
   const pathname = usePathname();
@@ -32,7 +35,10 @@ export default function FlowTabBar() {
     '--color-border',
   ]) as string[];
 
-  const activeIndex = Math.max(0, TABS.findIndex((t) => pathname === t.name || pathname.startsWith(t.name + '/')));
+  const activeTab = Math.max(0, TABS.findIndex((t) => pathname === t.name || pathname.startsWith(t.name + '/')));
+  // 标签序号 → 槽位序号（跳过中间按钮）
+  const slotOf = (i: number) => (i < CENTER_SLOT ? i : i + 1);
+  const activeIndex = slotOf(activeTab);
 
   const [barW, setBarW] = useState(0);
   const front = useRef(new Animated.Value(0)).current;   // 胶囊前沿（x）
@@ -48,7 +54,7 @@ export default function FlowTabBar() {
     if (!colorV[t.name]) colorV[t.name] = new Animated.Value(t.name === TABS[0].name ? 1 : 0);
   });
 
-  const slotW = barW / TABS.length;
+  const slotW = barW / SLOTS;
   const centerOf = (i: number) => slotW * i + slotW / 2;
 
   useEffect(() => {
@@ -84,8 +90,8 @@ export default function FlowTabBar() {
   // 图标弹跳 + 文字颜色渐变
   useEffect(() => {
     TABS.forEach((t, i) => {
-      Animated.timing(colorV[t.name], { toValue: i === activeIndex ? 1 : 0, duration: 220, useNativeDriver: false }).start();
-      if (i === activeIndex) {
+      Animated.timing(colorV[t.name], { toValue: slotOf(i) === activeIndex ? 1 : 0, duration: 220, useNativeDriver: false }).start();
+      if (slotOf(i) === activeIndex) {
           Animated.sequence([
             Animated.timing(scales[t.name], { toValue: 0.75, duration: 90, useNativeDriver: true }),
             Animated.spring(scales[t.name], { toValue: 1, friction: 4, tension: 140, useNativeDriver: true }),
@@ -126,8 +132,30 @@ export default function FlowTabBar() {
           }}
         />
       )}
-      {TABS.map((t, i) => {
-        const active = i === activeIndex;
+      {Array.from({ length: SLOTS }).map((_, slot) => {
+        if (slot === CENTER_SLOT) {
+          return (
+            <View key="add" style={{ flex: 1, alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => {
+                  router.navigate('/(tabs)');
+                  setTimeout(() => requestAddPerson(), 220);
+                }}
+                style={{
+                  width: 46, height: 46, borderRadius: 23, backgroundColor: accent,
+                  alignItems: 'center', justifyContent: 'center',
+                  shadowColor: accent, shadowOpacity: 0.45, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 6,
+                }}
+              >
+                <Text style={{ color: '#fff', fontSize: 24, fontWeight: '300', marginTop: -2 }}>＋</Text>
+              </TouchableOpacity>
+            </View>
+          );
+        }
+        const i = slot < CENTER_SLOT ? slot : slot - 1;
+        const t = TABS[i];
+        const active = slot === activeIndex;
         return (
           <TouchableOpacity
             key={t.name}

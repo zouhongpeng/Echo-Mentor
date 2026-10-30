@@ -8,6 +8,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { METHOD_CARDS, SCENES, buildPhraseSection } from "@/constants/methodologies";
 import { api } from "@/utils/api";
+import { getDsModel, recordUsage } from "@/utils/usage";
 
 export const DS_KEY_STORE = "ds_api_key";
 
@@ -248,6 +249,7 @@ function normJson(raw: any): any {
 }
 
 async function doRequest(system: string, user: string, key: string): Promise<DirectResult> {
+  const model = await getDsModel();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   let lastKind: AIFailureKind = "server";
@@ -257,7 +259,7 @@ async function doRequest(system: string, user: string, key: string): Promise<Dir
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
       body: JSON.stringify({
-        model: "deepseek-chat",
+        model,
         messages: [
           { role: "system", content: system },
           { role: "user", content: user },
@@ -275,6 +277,13 @@ async function doRequest(system: string, user: string, key: string): Promise<Dir
       return { ok: false, kind: "server", message: `DeepSeek 服务返回异常（${res.status}）` };
     }
     const data = await res.json();
+    // 记账：DeepSeek 返回 usage，累计 tokens 与花费
+    void recordUsage(
+      model,
+      data?.usage?.prompt_tokens,
+      data?.usage?.completion_tokens,
+      data?.usage?.prompt_cache_hit_tokens,
+    );
     const content = data?.choices?.[0]?.message?.content;
     if (typeof content !== "string") {
       return { ok: false, kind: "server", message: "DeepSeek 返回格式异常" };
@@ -341,6 +350,7 @@ export async function analyzeDirectStream(
   req: StreamDirectReq,
   onDelta: (fullText: string) => void,
 ): Promise<DirectResult> {
+  const model = await getDsModel();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
@@ -348,7 +358,8 @@ export async function analyzeDirectStream(
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${req.apiKey}` },
       body: JSON.stringify({
-        model: "deepseek-chat",
+        model,
+        stream_options: { include_usage: true },
         messages: [
           { role: "system", content: buildSystem(req.growthMode, req.baguan) },
           { role: "user", content: buildUserContent(req) },
@@ -370,6 +381,7 @@ export async function analyzeDirectStream(
     const decoder = new TextDecoder();
     let buf = "";
     let full = "";
+    let streamUsage: any = null;
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -383,6 +395,7 @@ export async function analyzeDirectStream(
         if (!payload || payload === "[DONE]") continue;
         try {
           const obj = JSON.parse(payload);
+          if (obj?.usage) streamUsage = obj.usage;
           const delta = obj?.choices?.[0]?.delta?.content;
           if (typeof delta === "string" && delta) {
             full += delta;
@@ -390,6 +403,10 @@ export async function analyzeDirectStream(
           }
         } catch { /* 忽略不完整分片 */ }
       }
+    }
+    // 记账：流式响应的 usage 在最后一个分片（需 stream_options.include_usage）
+    if (streamUsage) {
+      void recordUsage(model, streamUsage.prompt_tokens, streamUsage.completion_tokens, streamUsage.prompt_cache_hit_tokens);
     }
     const json = extractJson(full);
     if (!json) return { ok: false, kind: "parse", message: "AI 返回无法解析，请稍后再试" };
@@ -428,6 +445,7 @@ export async function chatDirect(
   messages: { role: "user" | "assistant"; content: string }[],
   temperature = 0.8,
 ): Promise<string> {
+  const model = await getDsModel();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
@@ -435,7 +453,7 @@ export async function chatDirect(
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model: "deepseek-chat",
+        model,
         messages: [{ role: "system", content: system }, ...messages],
         temperature,
         stream: false,
@@ -445,6 +463,12 @@ export async function chatDirect(
     });
     if (!res.ok) throw new Error(`DeepSeek 服务异常（${res.status}）`);
     const data = await res.json();
+    void recordUsage(
+      model,
+      data?.usage?.prompt_tokens,
+      data?.usage?.completion_tokens,
+      data?.usage?.prompt_cache_hit_tokens,
+    );
     const content = data?.choices?.[0]?.message?.content;
     if (typeof content !== "string" || !content.trim()) throw new Error("AI 返回为空");
     return content;
