@@ -24,7 +24,7 @@ android {
     minSdkVersion safeExtGet("minSdkVersion", 24)
     targetSdkVersion safeExtGet("targetSdkVersion", 36)
   }
-  lintOptions {
+  lint {
     abortOnError false
   }
 }

@@ -33,21 +33,20 @@ jobs:
         working-directory: client
         run: npx expo prebuild -p android --no-install
 
-      - name: Patch root build.gradle (compileSdk fallback for pnpm layouts)
+      - name: Patch root build.gradle (SDK versions via root ext)
         working-directory: client/android
         run: |
           cat >> build.gradle <<'EOF'
 
-          // CI fallback: pnpm 布局下个别 RN 库的 compileSdk 可能未生效，统一兜底
-          subprojects { sp ->
-            afterEvaluate {
-              if (sp.plugins.hasPlugin("com.android.library")) {
-                sp.android.compileSdkVersion = 36
-              }
-            }
+          // CI patch: 部分 RN 库（如 async-storage）通过 rootProject.ext 读取 SDK 版本，
+          // pnpm 布局下默认值（32）低于 RN 0.81 要求，这里统一定义
+          ext {
+            compileSdkVersion = 36
+            targetSdkVersion = 36
+            minSdkVersion = 24
           }
           EOF
-          tail -15 build.gradle
+          tail -12 build.gradle
 
       - name: Build debug APK
         working-directory: client/android
