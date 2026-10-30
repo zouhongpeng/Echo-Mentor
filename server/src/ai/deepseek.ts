@@ -151,11 +151,56 @@ export function getVisionConfig(): VisionConfig {
 export async function recognizeImage(system: string, user: string, imageDataUri: string): Promise<string> {
   const cfg = getVisionConfig();
   const key = cfg.apiKey;
-  if (!key) {
+  // DeepSeek V4.1 Flash（deepseek-flash）已原生支持图片输入，优先复用 DEEPSEEK_API_KEY
+  const dsKey = process.env.DEEPSEEK_API_KEY || "";
+  if (!key && !dsKey) {
     throw new Error(
-      "未配置视觉模型：可在本应用「设置 → 视觉模型」填入智谱 API Key（open.bigmodel.cn 免费申请），或在服务端配置 VISION_API_KEY 环境变量。"
+      "未配置视觉模型：可在本应用「设置 → 视觉模型」填入智谱 API Key（open.bigmodel.cn 免费申请），或配置 DEEPSEEK_API_KEY / VISION_API_KEY 环境变量。"
     );
   }
+
+  // 先试 DeepSeek 原生视觉（同一把文本 Key，无需额外申请）
+  if (dsKey) {
+    for (const model of ["deepseek-flash", "deepseek-v4-flash-vision-exp"]) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), VISION_TIMEOUT_MS);
+      try {
+        const res = await fetch("https://api.deepseek.com/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${dsKey}` },
+          body: JSON.stringify({
+            model,
+            messages: [
+              { role: "system", content: system },
+              {
+                role: "user",
+                content: [
+                  { type: "text", text: user },
+                  { type: "image_url", image_url: { url: imageDataUri } },
+                ],
+              },
+            ],
+            temperature: 0.3,
+            max_tokens: 4096,
+            stream: false,
+          }),
+          signal: controller.signal,
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const content = (data as any)?.choices?.[0]?.message?.content;
+          if (typeof content === "string" && content.trim()) return content;
+        } else {
+          console.error(`[vision] deepseek model=${model} status=${res.status}`);
+        }
+      } catch (e) {
+        console.error(`[vision] deepseek model=${model} err=${(e as any)?.message}`);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  }
+  if (!key) throw new Error("视觉模型调用失败：请检查 DeepSeek Key 或配置智谱视觉 Key");
   const VISION_BASE_URL = cfg.baseUrl;
   const VISION_MODEL = cfg.model;
   const isZhipu = /bigmodel/i.test(VISION_BASE_URL) || /glm/i.test(VISION_MODEL);

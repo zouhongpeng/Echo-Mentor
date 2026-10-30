@@ -6,6 +6,7 @@
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system/legacy";
+import { getDsKey } from "./deepseek";
 
 const K_KEY = "reply-assistant.vision-key";
 const K_BASE = "reply-assistant.vision-base";
@@ -43,13 +44,16 @@ export async function clearLocalVision() {
   await AsyncStorage.multiRemove([K_KEY, K_BASE, K_MODEL]);
 }
 
-/** 识别截图：返回 { speaker, text } 数组 */
+/** 识别截图：返回 { speaker, text } 数组
+ *  优先用本机已配置的 DeepSeek Key 走 deepseek-flash（V4.1 Flash 原生视觉，无需额外配置）；
+ *  其次用智谱视觉 Key；都没有则抛 NO_LOCAL_KEY 由调用方降级服务器。
+ */
 export async function recognizeDirect(
   imageUri: string,
   personName: string
 ): Promise<{ speaker: string; text: string }[]> {
-  const cfg = await getLocalVision();
-  if (!cfg) throw new Error("NO_LOCAL_KEY");
+  const [dsKey, zp] = await Promise.all([getDsKey(), getLocalVision()]);
+  if (!dsKey && !zp) throw new Error("NO_LOCAL_KEY");
 
   // 图片转 base64（此处图片已经过压缩，宽度 1000px 内）
   const b64 = await (FileSystem as any).readAsStringAsync(imageUri, {
@@ -63,59 +67,76 @@ export async function recognizeDirect(
 speaker 只允许两种取值：用户本人发的消息填"我"，${who}发的消息填"${who}"。绝不能输出其他值。
 只识别对话气泡里的文字，忽略背景、时间、红点等无关元素。不要编造内容。`;
 
-  const candidates = [cfg.model, "glm-4.6v-flashx", "glm-4v-flash", "glm-4.1v-thinking-flash"].filter(
-    (m, i, arr) => m && arr.indexOf(m) === i
-  );
+  // 候选通道：DeepSeek 优先（同一把 Key 顺带识图），再智谱降级
+  const channels: { baseUrl: string; apiKey: string; models: string[] }[] = [];
+  if (dsKey) {
+    channels.push({
+      baseUrl: "https://api.deepseek.com/v1/chat/completions",
+      apiKey: dsKey,
+      models: ["deepseek-flash", "deepseek-v4-flash-vision-exp"],
+    });
+  }
+  if (zp) {
+    channels.push({
+      baseUrl: zp.baseUrl,
+      apiKey: zp.apiKey,
+      models: [zp.model, "glm-4.6v-flashx", "glm-4v-flash", "glm-4.1v-thinking-flash"].filter(
+        (m, i, arr) => m && arr.indexOf(m) === i
+      ),
+    });
+  }
 
   let lastErr: unknown;
-  for (const model of candidates) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-    try {
-      const payload: Record<string, unknown> = {
-        model,
-        messages: [
-          { role: "system", content: system },
-          {
-            role: "user",
-            content: [
-              { type: "text", text: "请识别并输出 JSON。" },
-              { type: "image_url", image_url: { url: dataUri } },
-            ],
-          },
-        ],
-        temperature: 0.3,
-        max_tokens: /glm-4v-flash/i.test(model) ? 1024 : 4096,
-        stream: false,
-      };
-      if (/glm-4\.6v/i.test(model)) (payload as any).thinking = { type: "disabled" };
-      const res = await fetch(cfg.baseUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        lastErr = new Error(`视觉模型 ${res.status}: ${text.slice(0, 160)}`);
-        continue; // 换下一个模型
+  for (const ch of channels) {
+    for (const model of ch.models) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+      try {
+        const payload: Record<string, unknown> = {
+          model,
+          messages: [
+            { role: "system", content: system },
+            {
+              role: "user",
+              content: [
+                { type: "text", text: "请识别并输出 JSON。" },
+                { type: "image_url", image_url: { url: dataUri } },
+              ],
+            },
+          ],
+          temperature: 0.3,
+          max_tokens: /glm-4v-flash/i.test(model) ? 1024 : 4096,
+          stream: false,
+        };
+        if (/glm-4\.6v/i.test(model)) (payload as any).thinking = { type: "disabled" };
+        const res = await fetch(ch.baseUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${ch.apiKey}` },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          lastErr = new Error(`视觉识别 ${res.status}: ${text.slice(0, 160)}`);
+          continue; // 换下一个模型/通道
+        }
+        const data = await res.json();
+        const content = data?.choices?.[0]?.message?.content;
+        if (typeof content !== "string") {
+          lastErr = new Error("视觉模型返回格式异常");
+          continue;
+        }
+        const messages = parseMessages(content);
+        if (!messages.length) {
+          lastErr = new Error("未识别出对话");
+          continue;
+        }
+        return messages;
+      } catch (e: unknown) {
+        lastErr = e;
+      } finally {
+        clearTimeout(timer);
       }
-      const data = await res.json();
-      const content = data?.choices?.[0]?.message?.content;
-      if (typeof content !== "string") {
-        lastErr = new Error("视觉模型返回格式异常");
-        continue;
-      }
-      const messages = parseMessages(content);
-      if (!messages.length) {
-        lastErr = new Error("未识别出对话");
-        continue;
-      }
-      return messages;
-    } catch (e: unknown) {
-      lastErr = e;
-    } finally {
-      clearTimeout(timer);
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error("视觉识别失败");

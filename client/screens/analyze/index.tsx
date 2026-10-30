@@ -309,42 +309,41 @@ export default function AnalyzeScreen() {
   };
 
   const runRecognize = async (file: any) => {
-    // 优先本机直连视觉模型（不依赖后端）；未配置 Key 或直连失败 → 退回服务器识别
-    const { getLocalVision, recognizeDirect } = await import('@/utils/vision');
-    const local = await getLocalVision();
-    if (local) {
-      try {
-        const messages = await recognizeDirect(file.uri, personName);
-        setShotMessages(messages);
-        setShotStep('edit');
-        return;
-      } catch (e: any) {
-        if (e?.message !== 'NO_LOCAL_KEY') {
-          // 直连失败（网络/模型问题），再试服务器链路
-          try {
-            const data = await serverRecognize(file);
-            setShotMessages(data);
-            setShotStep('edit');
-            return;
-          } catch { /* 两路都失败，走统一报错 */ }
-          Alert.alert('识别失败', `${e?.message ?? '请稍后重试'}。也可以直接粘贴聊天记录，不影响分析。`, [
+    // 优先手机直连视觉（DeepSeek 钥匙或智谱 Key 均可）；没有钥匙或直连失败 → 退回服务器识别
+    const { recognizeDirect } = await import('@/utils/vision');
+    try {
+      const messages = await recognizeDirect(file.uri, personName);
+      setShotMessages(messages);
+      setShotStep('edit');
+      return;
+    } catch (e: any) {
+      if (e?.message === 'NO_LOCAL_KEY') {
+        // 本机没有可用的 Key，走服务器链路
+        try {
+          const data = await serverRecognize(file);
+          setShotMessages(data);
+          setShotStep('edit');
+          return;
+        } catch (e2: any) {
+          Alert.alert('识别失败', `${e2?.message ?? '请稍后重试'}（提示：在设置页填入 DeepSeek Key 可手机直连识别，不依赖服务器）。也可以直接粘贴聊天记录，不影响分析。`, [
             { text: '知道了', onPress: () => { setShotImage(null); setPicking(false); setShotStep(null); } },
           ]);
           setPicking(false);
           return;
         }
       }
-    }
-    try {
-      const data = await serverRecognize(file);
-      setShotMessages(data);
-      setShotStep('edit');
-    } catch (e: any) {
-      const hint = local ? '' : '（提示：设置页「视觉模型」填入智谱 Key 可手机直连识别，不依赖服务器）';
-      Alert.alert('识别失败', `${e?.message ?? '请稍后重试'}${hint}。也可以直接粘贴聊天记录，不影响分析。`, [
-        { text: '知道了', onPress: () => { setShotImage(null); setPicking(false); setShotStep(null); } },
-      ]);
-      setPicking(false);
+      // 直连失败：先试服务器，再报错
+      try {
+        const data = await serverRecognize(file);
+        setShotMessages(data);
+        setShotStep('edit');
+        return;
+      } catch {
+        Alert.alert('识别失败', `${e?.message ?? '请稍后重试'}。也可以直接粘贴聊天记录，不影响分析。`, [
+          { text: '知道了', onPress: () => { setShotImage(null); setPicking(false); setShotStep(null); } },
+        ]);
+        setPicking(false);
+      }
     }
   };
 
