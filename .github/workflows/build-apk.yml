@@ -51,22 +51,27 @@ jobs:
           EOF
           tail -12 build.gradle
 
-      - name: Build debug APK
+      - name: Build release APK (JS bundle 内嵌，独立运行)
         working-directory: client/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Verify JS bundle embedded
+        working-directory: client/android
+        run: |
+          unzip -l app/build/outputs/apk/release/app-release.apk | grep -E "assets/index.android.bundle" || (echo "JS bundle 未打包进 APK！" && exit 1)
 
       - name: Rename APK
         run: |
           mkdir -p dist
-          cp client/android/app/build/outputs/apk/debug/app-debug.apk dist/EchoMentor-debug.apk
+          cp client/android/app/build/outputs/apk/release/app-release.apk dist/EchoMentor.apk
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: EchoMentor-debug-apk
-          path: dist/EchoMentor-debug.apk
+          name: EchoMentor-apk
+          path: dist/EchoMentor.apk
 
       - name: Publish to release (latest)
         uses: softprops/action-gh-release@v2
@@ -77,6 +82,6 @@ jobs:
             自动构建于 ${{ github.event.head_commit.timestamp }}
             提交：${{ github.sha }}
             
-            变更见 commit message。直接下载 EchoMentor-debug.apk 安装（需允许安装未知来源应用）。
-          files: dist/EchoMentor-debug.apk
+            变更见 commit message。直接下载 EchoMentor.apk 安装（需允许安装未知来源应用）。
+          files: dist/EchoMentor.apk
           overwrite_files: true
