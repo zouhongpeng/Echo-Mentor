@@ -124,6 +124,8 @@ export default function AnalyzeScreen() {
   // 关系阶段（可选）：帮 AI 对症下药
   const STAGE_OPTIONS = ['初识破冰', '了解升温', '暧昧推进', '线下见面', '表达心意', '长期维持'] as const;
   const [selectedStage, setSelectedStage] = useState<string>('');
+  // 八观识人（可选）：额外输出《人物志》结构化人物速评
+  const [baguanOn, setBaguanOn] = useState(false);
   const [shotMessages, setShotMessages] = useState<{ speaker: string; text: string }[]>([]);
 
   const doCopy = async (t: string) => {
@@ -156,6 +158,7 @@ export default function AnalyzeScreen() {
         growthMode: gmode,
         tone,
         styleExamples,
+        baguan: baguanOn,
       };
       let dr = await analyzeDirectStream(sReq, (full) => {
         setStreamText(full);
@@ -189,6 +192,7 @@ export default function AnalyzeScreen() {
     try {
       const payload: any = { person_id: personId, chat_input: chat, thought_input: thought, tone };
       if (selectedStage) payload.stage = selectedStage;
+      if (baguanOn) payload.baguan = true;
       if (gmode === 'critique') payload.my_reply = thought;
       if (styleExamples?.length) payload.style_examples = styleExamples;
       const res = await api.analyze(payload);
@@ -391,7 +395,18 @@ export default function AnalyzeScreen() {
                 <Text className={`text-[12px] ${selectedStage === st ? 'text-white font-medium' : 'text-foreground/70'}`}>{st}</Text>
               </TouchableOpacity>
             ))}
+            <TouchableOpacity
+              onPress={() => setBaguanOn((v) => !v)}
+              className={`px-3 h-8 rounded-full items-center justify-center ${baguanOn ? 'bg-accent' : 'bg-surface border border-border'}`}
+            >
+              <Text className={`text-[12px] ${baguanOn ? 'text-white font-medium' : 'text-foreground/70'}`}>☰ 八观识人</Text>
+            </TouchableOpacity>
           </View>
+          {!!baguanOn && (
+            <Text className="text-[11px] text-muted mt-1.5 leading-4">
+              已开启《人物志》八观速评：分析结果会附带对方的结构化人物画像（只列证据能支撑的维度，附防看走眼自检）。
+            </Text>
+          )}
         </View>
 
         {/* 双输入 */}
@@ -725,6 +740,35 @@ function ResultView({ result, marks, onCopy, onMark }: any) {
                 <Text key={i} className="text-[12.5px] leading-5 text-foreground/75">□ {a}</Text>
               ))}
             </View>
+          )}
+        </View>
+      )}
+
+      {/* 八观识人速评（人物志框架） */}
+      {!!result.baguan && !!result.baguan.observations?.length && (
+        <View className="mx-4 mb-1 rounded-2xl border border-border bg-white px-4 py-3">
+          <View className="flex-row items-center justify-between">
+            <Text className="text-[12px] font-bold text-foreground">☰ 八观识人 · 人物速评</Text>
+            <View className="px-2 py-0.5 rounded-full bg-on-surface">
+              <Text className="text-[10.5px] text-muted">置信度 {result.baguan.confidence || '低'}</Text>
+            </View>
+          </View>
+          {!!result.baguan.verdict && (
+            <Text className="mt-1.5 text-[13.5px] leading-5 text-foreground font-semibold">{result.baguan.verdict}</Text>
+          )}
+          <View className="mt-2 space-y-1.5">
+            {result.baguan.observations.map((o: any, i: number) => (
+              <View key={i} className="rounded-xl bg-on-surface px-3 py-2">
+                <Text className="text-[12.5px] leading-5 text-foreground/90">
+                  <Text className="font-semibold text-accent">{o.dim ? `${o.dim} · ` : ''}</Text>
+                  {o.point}
+                </Text>
+                {!!o.evidence && <Text className="text-[11px] leading-4 mt-0.5 text-muted">依据：{o.evidence}</Text>}
+              </View>
+            ))}
+          </View>
+          {!!result.baguan.caveat && (
+            <Text className="mt-2 text-[11px] leading-4 text-muted">⚠ 防看走眼自检：{result.baguan.caveat}</Text>
           )}
         </View>
       )}

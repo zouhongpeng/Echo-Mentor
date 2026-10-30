@@ -399,6 +399,42 @@ export const STAGE_PLAYBOOK: Record<RelationshipStage, { goal: string; dos: stri
   },
 };
 
+/* ============ 八观识人（刘劭《人物志》）============ */
+
+/** 八观维度速查（注入提示词用，紧凑版） */
+export const BAGUAN_DIMS = [
+  "①夺救（矛盾时刻：说的与关键时刻做的是否一致）",
+  "②感变（应激反应：突发状况下的第一反应）",
+  "③志质（志向核对：时间花在哪，真实追求就是什么）",
+  "④所由（动机辨别：行为的来龙去脉，辨「似是而非」）",
+  "⑤爱敬（爱与敬：TA在意谁、对用不到的人什么态度）",
+  "⑥情机（情绪开关：何时得意、何时失态，情绪暴露价值观）",
+  "⑦所短（短长同源：缺点是什么优点的影子）",
+  "⑧聪明（通达程度：抓重点/换位思考/复盘）",
+].join("\n");
+
+export const BAGUAN_MIAS = "偏听评价/好恶滤镜/误判格局/以早定终身/同类相怜/以地位论人/对表演型人格失防";
+
+/** 生成八观识人提示词段落（baguan=false 时空串） */
+export function buildBaguanSection(baguan?: boolean): string {
+  if (!baguan) return "";
+  return `【八观识人模式（已开启）】
+在完成常规分析之外，额外输出 baguan 字段——用三国刘劭《人物志》的识人框架对「对方」做结构化速评。
+八观维度对照：
+${BAGUAN_DIMS}
+
+硬性要求：
+1. 只输出当前素材能支撑的维度（2-4 条 observations），素材不够的维度直接不写，禁止硬凑八条。
+2. 每条 observation 必须引用聊天记录或档案原句作证据；无证据的观点视为不合格。
+3. confidence 只能是 高/中/低；素材只有一两次对话时必须给"低"，不得高估。
+4. verdict 是一句话本质判断（≤30字），判断不了就写"素材不足，暂无法定性"。
+5. caveat 必须做七缪自检，从这些偏差中挑最可能影响本次结论的 1-2 个点明：${BAGUAN_MIAS}。
+6. 本框架只用于理解与自我保护：观察验证建议放进 notes，绝不提供操纵、试探、PUA 类话术。
+
+baguan 输出结构（并入主 JSON）：
+"baguan": {"verdict": "一句话本质判断", "confidence": "高/中/低", "observations": [{"dim": "维度名（如 感变/所由/爱敬）", "point": "判断（≤30字）", "evidence": "引用原句"}], "caveat": "七缪自检提示（1-2句）"}`;
+}
+
 /** 生成阶段打法提示词段落（stage 无效时返回空串） */
 export function buildStageSection(stage?: string): string {
   if (!stage) return "";

@@ -4,6 +4,7 @@ import {
   buildMethodologySection,
   buildPhraseSection,
   buildStageSection,
+  buildBaguanSection,
   SCENES,
   SCENE_THEORY,
   METHODOLOGY_CARDS,
@@ -11,6 +12,14 @@ import {
 
 /** 成长模式：canned (话术) / hint (提示) / critique (点评) */
 export type GrowthMode = "canned" | "hint" | "critique";
+
+/** 八观识人速评（刘劭《人物志》框架，baguan 开启时输出） */
+export interface BaguanInsight {
+  verdict: string; // 一句话本质判断
+  confidence: "高" | "中" | "低";
+  observations: { dim: string; point: string; evidence: string }[];
+  caveat?: string; // 七缪自检提示
+}
 
 export interface AnalysisInput {
   personName: string;
@@ -22,6 +31,7 @@ export interface AnalysisInput {
   tone?: string;
   stage?: string; // 用户手动指定的关系阶段（可选）
   styleExamples?: string; // 用户过往采纳回复/本人想法（风格学习，脱敏后）
+  baguan?: boolean; // 八观识人速评开关
 }
 
 export interface AnalysisOutcome {
@@ -31,10 +41,11 @@ export interface AnalysisOutcome {
   notes: string[];
   temperature: { label: "热" | "温" | "冷"; reason: string };
   stage_tip?: { stage_now?: string; next?: string; actions?: string[] }; // 关系阶段推进建议
+  baguan?: BaguanInsight; // 八观识人速评（开关开启时）
 }
 
 /** 构建系统提示词（含全部防差错规范 + 沟通方法论引擎） */
-function buildSystem(mode: GrowthMode, stage?: string): string {
+function buildSystem(mode: GrowthMode, stage?: string, baguan?: boolean): string {
   const modeRule =
     mode === "hint"
       ? "成长模式=提示：建议回复只给【思路方向】和【关键词】，绝不给可直接发送的完整原话。"
@@ -103,12 +114,13 @@ ${buildPhraseSection()}`;
 ${sceneRule}
 
 ${modeRule}
-${buildStageSection(stage)}`;
+${buildStageSection(stage)}
+${buildBaguanSection(baguan)}`;
 }
 
 /** 生成并解析一次分析 */
 export async function runAnalysis(input: AnalysisInput): Promise<AnalysisOutcome> {
-  const system = buildSystem(input.growthMode, input.stage);
+  const system = buildSystem(input.growthMode, input.stage, input.baguan);
 
   const userContent = [
     "【人物背景档案】",
@@ -155,6 +167,27 @@ export async function runAnalysis(input: AnalysisInput): Promise<AnalysisOutcome
           actions: Array.isArray(parsed.stage_tip.actions) ? parsed.stage_tip.actions.filter((a: any) => typeof a === "string").slice(0, 3) : undefined,
         }
       : undefined,
+    baguan: (() => {
+      if (!input.baguan || !parsed.baguan || typeof parsed.baguan !== "object") return undefined;
+      const b = parsed.baguan as any;
+      const obs = Array.isArray(b.observations)
+        ? b.observations
+            .filter((o: any) => o && typeof o.point === "string")
+            .slice(0, 8)
+            .map((o: any) => ({
+              dim: typeof o.dim === "string" ? o.dim : "",
+              point: String(o.point),
+              evidence: typeof o.evidence === "string" ? o.evidence : "",
+            }))
+        : [];
+      if (!b.verdict && !obs.length) return undefined;
+      return {
+        verdict: typeof b.verdict === "string" ? b.verdict : "",
+        confidence: ["高", "中", "低"].includes(b.confidence) ? b.confidence : "低",
+        observations: obs,
+        caveat: typeof b.caveat === "string" ? b.caveat : undefined,
+      };
+    })(),
   };
 }
 

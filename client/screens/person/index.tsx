@@ -771,6 +771,29 @@ function TimelineCard({ record, personaName, first, last, expanded, onToggle, on
                   )}
                 </View>
               )}
+              {!!res.baguan && !!res.baguan.observations?.length && (
+                <View className="mt-2 rounded-2xl border border-border bg-white px-3.5 py-3">
+                  <View className="flex-row items-center justify-between">
+                    <Text className="text-[12px] font-bold text-foreground">☰ 八观识人 · 人物速评</Text>
+                    <View className="px-2 py-0.5 rounded-full bg-on-surface">
+                      <Text className="text-[10.5px] text-muted">置信度 {res.baguan.confidence || '低'}</Text>
+                    </View>
+                  </View>
+                  {!!res.baguan.verdict && (
+                    <Text className="mt-1 text-[13px] leading-5 text-foreground font-semibold">{res.baguan.verdict}</Text>
+                  )}
+                  <View className="mt-1.5">
+                    {res.baguan.observations.map((o: any, i: number) => (
+                      <Text key={i} className="text-[12.5px] leading-5 text-foreground/85 mt-1">
+                        <Text className="font-semibold text-accent">{o.dim ? `${o.dim} · ` : ''}</Text>{o.point}
+                      </Text>
+                    ))}
+                  </View>
+                  {!!res.baguan.caveat && (
+                    <Text className="mt-1.5 text-[11px] leading-4 text-muted">⚠ {res.baguan.caveat}</Text>
+                  )}
+                </View>
+              )}
               {(() => {
                 const outcome = record.result?.outcome;
                 const usedAny = Object.values(record.result?.marks || {}).some(Boolean);

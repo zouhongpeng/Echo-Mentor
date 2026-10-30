@@ -292,6 +292,7 @@ app.post("/api/v1/analyze", requirePin, async (req, res) => {
       style_examples: z.array(z.string()).optional().default([]), // 风格学习：过往采纳回复/本人想法
       tone: z.string().optional(),
       stage: z.string().optional(), // 关系阶段（六选一，可选）
+      baguan: z.boolean().optional().default(false), // 八观识人速评开关
     });
     const body = schema.parse(req.body);
 
@@ -359,6 +360,7 @@ app.post("/api/v1/analyze", requirePin, async (req, res) => {
           growthMode,
           tone: body.tone,
           stage: body.stage,
+          baguan: body.baguan,
           styleExamples: (body.style_examples ?? []).length
             ? body.style_examples.map((s: string) => anonymize(s, person.name)).join("\n")
             : undefined,
